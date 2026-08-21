@@ -6,15 +6,18 @@
 //   WEB_EXT_API_SECRET  - AMO JWT secret
 // (never commit these; export them in your shell before running this script)
 
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
-import webExt from 'web-ext';
 
 const extensionRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const firefoxDir = path.join(extensionRoot, 'dist', 'firefox');
+const firefoxArtifactsDir = path.join(extensionRoot, 'web-ext-artifacts');
+const firefoxListingMetadataPath = path.join(extensionRoot, 'manifests', 'firefox-listing.json');
 
 function fail(message) {
   console.error(`[ERROR] ${message}`);
@@ -47,29 +50,62 @@ if (!existsSync(path.join(firefoxDir, 'manifest.json'))) {
   fail(`Firefox build output was not found: ${firefoxDir}`);
 }
 
+if (!existsSync(firefoxListingMetadataPath)) {
+  fail(
+    `Listing metadata file not found: ${firefoxListingMetadataPath}\n` +
+      '  This file is required for the initial listed submission (categories/summary/license).'
+  );
+}
+
 console.log('\nSubmitting extension to Mozilla for LISTED review/publish...');
 console.log(`Extension source: ${firefoxDir}`);
 
-const firefoxListingMetadataPath = path.join(extensionRoot, 'manifests', 'firefox-listing.json');
-if (!existsSync(firefoxListingMetadataPath)) {
-  fail(`Listing metadata file not found: ${firefoxListingMetadataPath}\n  This file is required for the initial listed submission (categories/summary/license).`);
+// Do not call webExt.cmd.sign() directly here. That is web-ext's lower-level
+// programmatic API and bypasses CLI argument/default preparation (for example
+// artifactsDir and webextVersion). Running the package's own CLI entry point
+// gives us exactly the same behavior as `web-ext sign` while remaining
+// cross-platform and without exposing the AMO secret in the command line.
+const require = createRequire(import.meta.url);
+const webExtEntry = require.resolve('web-ext');
+const webExtBin = path.join(path.dirname(webExtEntry), 'bin', 'web-ext.js');
+
+if (!existsSync(webExtBin)) {
+  fail(`web-ext CLI entry point was not found: ${webExtBin}`);
 }
 
-try {
-  await webExt.cmd.sign(
-    {
-      apiKey,
-      apiSecret,
-      channel: 'listed',
-      sourceDir: firefoxDir,
-      amoBaseUrl: 'https://addons.mozilla.org/api/v5/',
-      amoMetadata: firefoxListingMetadataPath,
-      approvalTimeout: 0
-    },
-    { shouldExitProgram: false }
-  );
-} catch (error) {
-  fail(`Mozilla submission failed: ${error?.message ?? error}`);
+const webExtArgs = [
+  webExtBin,
+  'sign',
+  '--channel',
+  'listed',
+  '--source-dir',
+  firefoxDir,
+  '--artifacts-dir',
+  firefoxArtifactsDir,
+  '--amo-base-url',
+  'https://addons.mozilla.org/api/v5/',
+  '--amo-metadata',
+  firefoxListingMetadataPath,
+  '--timeout',
+  '300000',
+  '--approval-timeout',
+  '0'
+];
+
+const signResult = spawnSync(process.execPath, webExtArgs, {
+  cwd: extensionRoot,
+  env: process.env,
+  stdio: 'inherit'
+});
+
+if (signResult.error) {
+  fail(`Mozilla submission failed: ${signResult.error.message}`);
+}
+if (signResult.status !== 0) {
+  const exitReason = signResult.signal
+    ? `terminated by signal ${signResult.signal}`
+    : `exited with code ${signResult.status ?? 'unknown'}`;
+  fail(`Mozilla submission failed: web-ext ${exitReason}.`);
 }
 
 console.log('\n[OK] The extension was submitted to AMO.');
