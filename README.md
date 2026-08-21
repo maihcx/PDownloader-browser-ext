@@ -19,6 +19,22 @@
 > [!IMPORTANT]
 > This extension is not a standalone downloader. The PDownloader desktop application must be running for download, analysis, and media-format requests to work.
 
+## Browser Extensions
+
+<a href="https://addons.mozilla.org/en-US/firefox/addon/3ac2c3eaa9924d259be6/"><img src="https://img.shields.io/amo/v/3ac2c3eaa9924d259be6?label=Firefox&logo=firefoxbrowser" alt="Firefox Add-ons version"></a>
+<a href="https://chromewebstore.google.com/detail/pdownloader/kdbapmeegoljihpndnbfeockjjcoogbp"><img src="https://img.shields.io/chrome-web-store/v/kdbapmeegoljihpndnbfeockjjcoogbp?label=Chrome&logo=googlechrome" alt="Chrome Web Store version"></a>
+
+Download the browser extension to integrate PDownloader with your browser.
+
+<p align="left">
+  <a href="https://addons.mozilla.org/en-US/firefox/addon/3ac2c3eaa9924d259be6/">
+    <img src="https://img.shields.io/badge/GET_THE_ADD--ON-0A84FF?style=for-the-badge&logo=firefoxbrowser&logoColor=white" alt="Get the Firefox Add-on" height="48">
+  </a>
+  <a href="https://chromewebstore.google.com/detail/pdownloader/kdbapmeegoljihpndnbfeockjjcoogbp">
+    <img src="https://img.shields.io/badge/Available_in_the_Chrome_Web_Store-F1F3F4?style=for-the-badge&logo=googlechrome&logoColor=4285F4" alt="Available in the Chrome Web Store" height="48">
+  </a>
+</p>
+
 ## Source Code
 
 PDownloader is developed across the following repositories:
