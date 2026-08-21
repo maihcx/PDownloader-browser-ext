@@ -273,11 +273,7 @@
   }
 
   async function downloadDirectFallback(context) {
-    // Analysis is optional. If it cannot produce selectable formats, always
-    // continue with a real download attempt instead of surfacing an analysis
-    // error to the user. Prefer a captured/direct media resource first, then
-    // fall back to the generic best-video download path for provider/page URLs.
-    let candidateError = '';
+    if (context?.allowDirectFallback !== true) return null;
 
     try {
       const detected = await PDWebExt.runtime.sendMessage({
@@ -293,48 +289,17 @@
       );
       candidate ||= candidateFromContext(context);
 
-      if (candidate?.url) {
-        const response = await PDWebExt.runtime.sendMessage({
-          action: 'download_media_candidate',
-          candidateId: candidate.id || '',
-          preferredUrl: candidate.url,
-          candidate,
-          mediaType: 'video'
-        });
-        if (response?.success) return response;
-        candidateError = String(response?.error || '');
-      }
-    } catch (error) {
-      candidateError = String(error?.message || error || '');
-    }
+      if (!candidate?.url) return null;
 
-    const url = String(context?.url || '').trim();
-    if (!/^https?:\/\//i.test(url)) {
-      return { success: false, error: candidateError || PD.I18n.t('ytDownloadError') };
-    }
-
-    try {
-      const title = String(context?.title || document.title || 'video').trim() || 'video';
-      const response = await PDWebExt.runtime.sendMessage({
-        action: 'download_via_ytdlp',
-        url,
-        filename: `${sanitizeName(title)}.mp4`,
-        title,
-        referer: context?.referer || location.href,
-        headers: context?.headers || undefined,
-        audioOnly: false
+      return await PDWebExt.runtime.sendMessage({
+        action: 'download_media_candidate',
+        candidateId: candidate.id || '',
+        preferredUrl: candidate.url,
+        candidate,
+        mediaType: 'video'
       });
-
-      if (response?.success) return response;
-      return {
-        success: false,
-        error: response?.error || candidateError || PD.I18n.t('ytDownloadError')
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: String(error?.message || error || candidateError || PD.I18n.t('ytDownloadError'))
-      };
+    } catch (_) {
+      return { success: false };
     }
   }
 
@@ -506,7 +471,7 @@
 
     const dropdown = document.createElement('div');
     dropdown.className = 'pd-quality-dropdown';
-    dropdown.append(document.createElement('div'));
+    panel.append(mainButton, separator, closeButton, dropdown);
 
     panel.append(mainButton, separator, closeButton, dropdown);
 
@@ -605,7 +570,7 @@
       } else {
         showToast(
           panel,
-          fallbackResponse?.error || PD.I18n.t('ytDownloadError'),
+          fallbackResponse ? PD.I18n.t('ytDownloadError') : PD.I18n.t('ytCannotAnalyze'),
           true
         );
       }
