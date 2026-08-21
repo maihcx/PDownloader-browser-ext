@@ -1,4 +1,4 @@
-// Trích domain từ URL ngay trong popup, không cần round-trip qua background.
+// Extract the domain directly in the popup without a background round trip.
 function getDomainFromUrl(url) {
   try { return new URL(url).hostname; } catch (_) { return ''; }
 }

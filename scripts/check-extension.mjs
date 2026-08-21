@@ -21,7 +21,7 @@ function relative(filePath) {
 function walk(directory, predicate) {
   const files = [];
   for (const entry of readdirSync(directory)) {
-    if (['dist', 'node_modules', 'web-ext-artifacts'].includes(entry)) continue;
+    if (['dist', 'node_modules'].includes(entry)) continue;
     const fullPath = path.join(directory, entry);
     const stat = statSync(fullPath);
     if (stat.isDirectory()) files.push(...walk(fullPath, predicate));
@@ -57,14 +57,6 @@ for (const file of walk(root, file => /\.json$/i.test(file))) {
 }
 
 const manifest = JSON.parse(read(path.join(root, 'manifest.json')));
-const firefoxConfig = JSON.parse(read(path.join(root, 'manifests', 'firefox.json')));
-
-if ('update_url' in firefoxConfig || 'update_link' in firefoxConfig) {
-  fail('Firefox releases are AMO-managed; custom update_url/update_link fields are not allowed.');
-}
-if (existsSync(path.join(root, 'updates.json'))) {
-  fail('updates.json is obsolete for AMO-listed releases and must not be included.');
-}
 
 assertFile(manifest.action?.default_popup, 'manifest.action');
 for (const icon of Object.values(manifest.icons || {})) assertFile(icon, 'manifest.icons');

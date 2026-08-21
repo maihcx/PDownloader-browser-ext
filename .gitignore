@@ -143,3 +143,4 @@ vite.config.ts.timestamp-*
 .vite/
 PDownloader-store.zip
 PDownloader.xpi
+PDownloader-firefox-unsigned.zip

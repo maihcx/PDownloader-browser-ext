@@ -19,6 +19,16 @@
 > [!IMPORTANT]
 > This extension is not a standalone downloader. The PDownloader desktop application must be running for download, analysis, and media-format requests to work.
 
+## Source Code
+
+PDownloader is developed across the following repositories:
+
+| Component | Repository | Purpose |
+| --- | --- | --- |
+| Main App | [maihcx/PDownloader](https://github.com/maihcx/PDownloader) | Windows application, download engine, and releases. |
+| **Browser Extension** | **[maihcx/PDownloader-browser-ext](https://github.com/maihcx/PDownloader-browser-ext) ← You are here** | Browser integration, download interception, and media capture. |
+| Website | [maihcx/PDownloader-site](https://github.com/maihcx/PDownloader-site) | Website interface, translations, documentation reader, and Markdown articles. |
+
 ## Features
 
 - Automatically intercepts supported browser downloads and hands them to PDownloader.
@@ -155,7 +165,7 @@ After changing a background or content script, reload the extension and refresh 
 | `pnpm dev` | Watches and rebuilds the unpacked Chromium target in `dist/chromium`. |
 | `pnpm build:chrome` | Builds `dist/chromium`, `dist/store`, and `PDownloader-store.zip`. |
 | `pnpm build:firefox-nosign` | Builds `dist/firefox` and `PDownloader-firefox-unsigned.zip` for temporary testing. |
-| `pnpm build:firefox` | Builds and submits the listed Firefox release to AMO. Requires AMO credentials. |
+| `pnpm build:firefox` | Builds and submits the listed Firefox release to AMO without retaining a local signed package. Requires AMO credentials. |
 | `pnpm build` | Builds Chrome and then runs the signed Firefox release flow. |
 
 ## Project structure
@@ -202,7 +212,7 @@ export WEB_EXT_API_SECRET="your-jwt-secret"
 pnpm build:firefox
 ```
 
-Firefox automatically distributes updates for extensions listed on AMO, so this project intentionally does not include `update_url`, `update_link`, or `updates.json`. Production Firefox releases always use the listed AMO channel; use `pnpm build:firefox-nosign` for local testing.
+Firefox production releases use the listed AMO channel, which handles publication, distribution, and automatic updates. Use `pnpm build:firefox-nosign` for local testing.
 
 Never commit or share `WEB_EXT_API_SECRET`.
 
