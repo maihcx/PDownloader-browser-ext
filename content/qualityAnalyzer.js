@@ -471,7 +471,7 @@
 
     const dropdown = document.createElement('div');
     dropdown.className = 'pd-quality-dropdown';
-    panel.append(mainButton, separator, closeButton, dropdown);
+    dropdown.append(document.createElement('div'));
 
     panel.append(mainButton, separator, closeButton, dropdown);
 
