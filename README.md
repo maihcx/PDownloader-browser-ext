@@ -39,11 +39,11 @@ Download the browser extension to integrate PDownloader with your browser.
 
 PDownloader is developed across the following repositories:
 
-| Component | Repository | Purpose |
-| --- | --- | --- |
-| Main App | [maihcx/PDownloader](https://github.com/maihcx/PDownloader) | Windows application, download engine, and releases. |
-| **Browser Extension** | **[maihcx/PDownloader-browser-ext](https://github.com/maihcx/PDownloader-browser-ext) ← You are here** | Browser integration, download interception, and media capture. |
-| Website | [maihcx/PDownloader-site](https://github.com/maihcx/PDownloader-site) | Website interface, translations, documentation reader, and Markdown articles. |
+| Repository | Purpose |
+| --- | --- |
+| [Main App](https://github.com/maihcx/PDownloader) | Windows application, download engine, installer, and releases. |
+| **[Browser Extension](https://github.com/maihcx/PDownloader-browser-ext) ← You are here** | Browser integration, download interception, and media capture. |
+| [Website](https://github.com/maihcx/PDownloader-site) | Website, translations, documentation reader, and Markdown articles. |
 
 ## Features
 
