@@ -6,6 +6,35 @@
   const cache = new Map();
   const pending = new Map();
 
+  // Use the same preference as the main popup. Scope it to extension-owned
+  // roots, including portaled menus/toasts; never change the website's theme.
+  const themeRoots = new Set();
+  let themePreference = 'system', themeStarted = false, themeRevision = 0;
+  function applyPreference(value) {
+    themePreference = ['light', 'dark'].includes(value) ? value : 'system';
+    for (const element of themeRoots) element.dataset.pdTheme = themePreference;
+  }
+  function trackTheme(element) {
+    element.dataset.pdTheme = themePreference; themeRoots.add(element);
+    if (!themeStarted) {
+      themeStarted = true;
+      const storage = PDWebExt.storage;
+      const revision = themeRevision;
+      try {
+        storage?.onChanged?.addListener?.((changes, area) => {
+          if (area === 'local' && Object.hasOwn(changes, 'popupTheme')) {
+            themeRevision++; applyPreference(changes.popupTheme.newValue);
+          }
+        });
+        Promise.resolve(storage?.local?.get?.(['popupTheme'])).then(data => {
+          if (revision === themeRevision) applyPreference(data?.popupTheme);
+        }).catch(() => {});
+      } catch (_) { /* System preference remains usable when storage is unavailable. */ }
+    }
+    return element;
+  }
+  function untrackTheme(element) { themeRoots.delete(element); }
+
   function ensureTheme() {
     if (document.querySelector('link[data-pd-theme="1"]')) return;
     const link = document.createElement('link');
@@ -17,143 +46,49 @@
 
   function ensureStyle() {
     if (document.getElementById('pd-quality-style')) return;
+    const link = document.createElement('link');
+    link.id = 'pd-quality-style'; link.rel = 'stylesheet';
+    link.href = PDWebExt.runtime.getURL('common/videoControls.css');
+    (document.head || document.documentElement).appendChild(link);
+  }
 
-    const style = document.createElement('style');
-    style.id = 'pd-quality-style';
-    style.textContent = `
-.pd-quality-panel {
-  position: absolute;
-  top: 12px; right: 12px;
-  z-index: 2147483647;
-  font-family: 'Segoe UI', system-ui, sans-serif;
-  user-select: none;
-  background: var(--pd-bg, rgba(13,17,23,.88));
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--pd-border, rgba(79,195,247,.25));
-  border-radius: 10px;
-  box-shadow: 0 6px 28px var(--pd-shadow, rgba(0,0,0,.45)),
-              0 0 0 1px rgba(79,195,247,.07);
-  padding: 4px 6px;
-  display: flex;
-  align-items: center;
-  height: 36px;
-  box-sizing: border-box;
-  gap: 2px;
-  color: var(--pd-text, #e6edf3);
-}
-.pd-quality-panel.pd-quality-fixed { position: fixed; top: auto; right: auto; }
-.pd-quality-panel.pd-quality-shorts { right: auto; left: 12px; }
-
-.pd-quality-main-btn {
-  display: flex; align-items: center; gap: 8px;
-  background: transparent; border: none;
-  color: var(--pd-text, #e6edf3); font-size: 13px; font-weight: 600;
-  font-family: inherit; padding: 0 10px;
-  cursor: pointer; height: 100%;
-  border-radius: 7px; transition: background .18s, color .15s, transform .1s;
-  box-sizing: border-box;
-}
-.pd-quality-main-btn:hover { background: var(--pd-accent-bg, rgb(0,30,48)); color: var(--pd-text, #e6edf3); }
-.pd-quality-main-btn:active { transform: scale(.97); }
-.pd-quality-main-btn:disabled { cursor: wait; opacity: .9; }
-
-.pd-quality-icon {
-  width: 0; height: 0;
-  border-left: 10px solid var(--pd-accent, #4fc3f7);
-  border-top: 6px solid transparent;
-  border-bottom: 6px solid transparent;
-  display: inline-block;
-}
-.pd-quality-sep { width: 1px; height: 18px; background: var(--pd-border2, rgba(255,255,255,.08)); margin: 0 2px; }
-.pd-quality-close {
-  background: transparent; border: none;
-  color: var(--pd-muted, #8b949e); font-size: 13px; padding: 0 8px;
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  height: 100%; border-radius: 7px; transition: background .18s, color .15s;
-  font-weight: 600; box-sizing: border-box;
-}
-.pd-quality-close:hover { background: var(--pd-border2, rgba(255,255,255,.08)); color: var(--pd-text, #e6edf3); }
-
-.pd-quality-dropdown {
-  position: absolute;
-  top: calc(100% + 8px); right: 0;
-  width: 460px; max-width: calc(100vw - 16px); max-height: min(380px, calc(100vh - 64px));
-  background: var(--pd-dropdown, rgba(13,17,23,.95));
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--pd-border, rgba(79,195,247,.25));
-  border-radius: 12px;
-  box-shadow: 0 16px 48px var(--pd-shadow, rgba(0,0,0,.45));
-  padding: 10px; display: none;
-  flex-direction: column; gap: 6px;
-  z-index: 2147483647; overflow: hidden; box-sizing: border-box;
-}
-.pd-quality-dropdown.open { display: flex; }
-.pd-quality-panel.pd-quality-align-left .pd-quality-dropdown,
-.pd-quality-panel.pd-quality-shorts .pd-quality-dropdown { right: auto; left: 0; }
-
-.pd-quality-search {
-  width: 100%;
-  background: var(--pd-border2, rgba(255,255,255,.08));
-  border: 1px solid var(--pd-border, rgba(79,195,247,.25));
-  color: var(--pd-text, #e6edf3); padding: 7px 12px;
-  border-radius: 8px; font-size: 13px; font-family: inherit; outline: none;
-  transition: border-color .2s, background .2s; box-sizing: border-box;
-}
-.pd-quality-search:focus { border-color: var(--pd-accent, #4fc3f7); background: var(--pd-accent-bg, rgb(0,30,48)); }
-.pd-quality-search::placeholder { color: var(--pd-muted, #8b949e); }
-
-.pd-quality-filters {
-  display: flex; gap: 6px; padding-bottom: 8px;
-  border-bottom: 1px solid var(--pd-border2, rgba(255,255,255,.08));
-  flex-shrink: 0; flex-wrap: wrap;
-}
-.pd-quality-filter-btn {
-  background: var(--pd-border2, rgba(255,255,255,.08));
-  border: 1px solid var(--pd-border2, rgba(255,255,255,.08));
-  color: var(--pd-muted, #8b949e); padding: 5px 12px;
-  border-radius: 6px; font-size: 12px; font-weight: 600;
-  cursor: pointer; font-family: inherit; transition: all .18s;
-}
-.pd-quality-filter-btn:hover { border-color: var(--pd-accent, #4fc3f7); color: var(--pd-text, #e6edf3); }
-.pd-quality-filter-btn.active { background: var(--pd-accent-bg, rgb(0,30,48)); border-color: var(--pd-accent, #4fc3f7); color: var(--pd-text, #e6edf3); }
-
-.pd-quality-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; min-height: 0; }
-.pd-quality-empty { color: var(--pd-muted, #8b949e); font-size: 13px; padding: 20px; text-align: center; }
-.pd-quality-item {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 14px; color: var(--pd-text, #e6edf3); font-size: 13px;
-  cursor: pointer; border-radius: 8px; transition: background .15s;
-}
-.pd-quality-item:hover { background: var(--pd-accent-bg, rgb(0,30,48)); color: var(--pd-text, #e6edf3); }
-.pd-quality-size { color: var(--pd-accent, #4fc3f7); font-size: 12px; font-weight: 700; margin-left: 12px; flex-shrink: 0; }
-
-.pd-quality-spinner {
-  width: 14px; height: 14px;
-  border: 2px solid var(--pd-border2, rgba(255,255,255,.15));
-  border-top-color: var(--pd-accent, #4fc3f7);
-  border-radius: 50%; animation: pd-quality-spin .6s linear infinite; display: inline-block;
-}
-@keyframes pd-quality-spin { to { transform: rotate(360deg); } }
-
-.pd-quality-toast {
-  position: absolute; top: calc(100% + 8px); right: 0;
-  background: var(--pd-green-bg, rgba(76,175,80,.15)); color: var(--pd-green, #4caf50);
-  border: 1px solid var(--pd-green, #4caf50);
-  font-size: 13px; padding: 7px 16px; border-radius: 8px; white-space: nowrap;
-  box-shadow: 0 6px 20px var(--pd-shadow, rgba(0,0,0,.45));
-  animation: pd-quality-toast-in 2.8s forwards; pointer-events: none; z-index: 2147483647;
-}
-.pd-quality-toast.err { background: var(--pd-red-bg, rgba(244,67,54,.92)); color: #fff; border-color: var(--pd-red, #f44336); }
-@keyframes pd-quality-toast-in {
-  0% { opacity:0; transform: translateY(-4px); }
-  10% { opacity:1; transform: translateY(0); }
-  88% { opacity:1; }
-  100% { opacity:0; }
-}
-`;
-    (document.head || document.documentElement).appendChild(style);
+  const ICONS = {
+    download: 'M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4',
+    close: 'M6 6l12 12M18 6 6 18',
+    pip: 'M3 4h18v15H3zM12 11h7v6h-7z',
+    more: 'M12 4v1m0 6v1m0 6v1',
+    video: 'M3 5h18v14H3zM10 9l5 3-5 3z',
+    audio: 'M9 17V5l11-2v12M9 17a3 3 0 1 1-3-3h3M20 15a3 3 0 1 1-3-3h3'
+  };
+  function icon(name) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.classList.add('pd-quality-svg');
+    const path = document.createElementNS(svg.namespaceURI, 'path'); path.setAttribute('d', ICONS[name] || ICONS.download); svg.append(path); return svg;
+  }
+  function node(tag, cls, text) {
+    const item = document.createElement(tag); item.className = cls;
+    if (text !== undefined) item.textContent = text;
+    return item;
+  }
+  function layerHost(panel) {
+    const fullscreen = document.fullscreenElement;
+    if (fullscreen?.contains(panel)) return fullscreen;
+    try { const overlay = panel.closest('dialog[open], :popover-open'); if (overlay) return overlay; } catch (_) {}
+    return document.body || document.documentElement;
+  }
+  function placeLayer(layer, panel, alignment = 'left') {
+    const viewportWidth = document.documentElement.clientWidth || innerWidth;
+    const viewportHeight = innerHeight;
+    const rect = panel.getBoundingClientRect();
+    const width = Math.min(layer.offsetWidth || 360, viewportWidth - 16);
+    const height = Math.min(layer.offsetHeight || 150, viewportHeight - 16);
+    const preferredLeft = alignment === 'right' ? rect.right - width : rect.left;
+    const left = Math.min(Math.max(8, preferredLeft), Math.max(8, viewportWidth - width - 8));
+    const below = viewportHeight - rect.bottom - 16, above = rect.top - 16;
+    const openAbove = below < Math.min(height, 180) && above > below;
+    layer.style.maxHeight = Math.max(0, Math.min(440, openAbove ? above : below)) + 'px';
+    layer.style.left = Math.round(left) + 'px';
+    layer.style.top = Math.round(openAbove ? Math.max(8, rect.top - height - 8) : Math.max(8, rect.bottom + 8)) + 'px';
   }
 
   function sanitizeName(value, fallback = 'video') {
@@ -175,15 +110,22 @@
     if (!force && cached && Date.now() - cached.time < CACHE_TTL) return cached.data;
     if (!force && pending.has(key)) return pending.get(key);
 
-    const request = PDWebExt.runtime.sendMessage({
-      action: 'analyze_media',
-      url,
-      referer: context?.referer || location.href,
-      headers: context?.headers || undefined
-    }).then(data => {
-      if (data?.success) cache.set(key, { time: Date.now(), data });
+    const request = (async () => {
+      const urls = [...new Set([url, context?.mediaUrl].filter(value => /^https?:\/\//i.test(value || '')))];
+      let result;
+      for (const analysisUrl of urls) {
+        result = await PDWebExt.runtime.sendMessage({
+          action: 'analyze_media', url: analysisUrl,
+          referer: context?.referer || location.href,
+          headers: context?.headers || undefined
+        });
+        if (result?.success && result.formats?.length) return { ...result, analysisUrl };
+      }
+      return result;
+    })().then(data => {
+      if (data?.success && pending.get(key) === request) cache.set(key, { time: Date.now(), data });
       return data;
-    }).finally(() => pending.delete(key));
+    }).finally(() => { if (pending.get(key) === request) pending.delete(key); });
 
     pending.set(key, request);
     return request;
@@ -220,96 +162,26 @@
     };
   }
 
-  function normalizeComparableUrl(value) {
-    try {
-      const url = new URL(String(value || ''), location.href);
-      url.hash = '';
-      return url.href;
-    } catch (_) {
-      return String(value || '').split('#')[0];
-    }
-  }
-
-  function candidateRelationScore(candidate, context, activeUrls) {
-    const candidateUrl = normalizeComparableUrl(candidate?.url);
-    const contextUrl = normalizeComparableUrl(context?.url);
-    const mediaUrl = normalizeComparableUrl(context?.mediaUrl);
-    const contextPage = normalizeComparableUrl(context?.referer || location.href);
-    const candidatePage = normalizeComparableUrl(candidate?.pageUrl || candidate?.referer);
-    let score = 0;
-
-    if (candidateUrl && candidateUrl === mediaUrl) score += 20_000;
-    if (candidateUrl && activeUrls.has(candidateUrl)) score += 15_000;
-    if (candidateUrl && candidateUrl === contextUrl) score += 10_000;
-    if (candidatePage && candidatePage === contextPage) score += 1_000;
-
-    try {
-      if (candidateUrl && contextUrl
-          && new URL(candidateUrl).origin === new URL(contextUrl).origin) {
-        score += 500;
-      }
-    } catch (_) { }
-
-    return score;
-  }
-
-  function selectContextCandidate(candidates, context, playback) {
-    const sourceCandidates = candidates || [];
-    const activeUrls = new Set((playback?.activeVideoUrls || [])
-      .map(normalizeComparableUrl)
-      .filter(Boolean));
-    const related = sourceCandidates
-      .filter(candidate => /^https?:\/\//i.test(candidate?.url || ''))
-      .map(candidate => ({
-        candidate,
-        relation: candidateRelationScore(candidate, context, activeUrls),
-        freshness: Number(candidate.lastSeenAt || candidate.foundAt || 0)
-      }))
-      .filter(item => item.relation >= 10_000
-        || (sourceCandidates.length === 1 && item.relation > 0))
-      .sort((a, b) => (b.relation - a.relation) || (b.freshness - a.freshness));
-
-    return related[0]?.candidate || null;
-  }
-
   async function downloadDirectFallback(context) {
     if (context?.allowDirectFallback !== true) return null;
-
+    // Only the selected element's source is safe. A tab-wide "best candidate"
+    // can belong to another video, an advertisement, or an earlier SPA route.
+    const candidate = candidateFromContext(context);
+    if (!candidate?.url) return null;
     try {
-      const detected = await PDWebExt.runtime.sendMessage({
-        action: 'get_media_candidates',
-        mediaType: 'video',
-        minScore: 45
-      });
-
-      let candidate = selectContextCandidate(
-        detected?.candidates,
-        context,
-        detected?.playback
-      );
-      candidate ||= candidateFromContext(context);
-
-      if (!candidate?.url) return null;
-
       return await PDWebExt.runtime.sendMessage({
         action: 'download_media_candidate',
-        candidateId: candidate.id || '',
-        preferredUrl: candidate.url,
-        candidate,
-        mediaType: 'video'
+        preferredUrl: candidate.url, candidate, mediaType: 'video'
       });
-    } catch (_) {
-      return { success: false };
-    }
+    } catch (error) { return { success: false, error: error?.message }; }
   }
 
   function showToast(panel, message, error = false) {
-    panel.querySelectorAll('.pd-quality-toast').forEach(item => item.remove());
-    const toast = document.createElement('div');
-    toast.className = 'pd-quality-toast' + (error ? ' err' : '');
-    toast.textContent = message;
-    panel.appendChild(toast);
-    setTimeout(() => toast.remove(), 2800);
+    const previous = panel._pdToast; previous?.remove(); untrackTheme(previous);
+    const toast = node('div', 'pd-quality-toast' + (error ? ' err' : ''), message);
+    toast.setAttribute('role', error ? 'alert' : 'status');
+    trackTheme(toast); panel._pdToast = toast; layerHost(panel).append(toast); placeLayer(toast, panel);
+    setTimeout(() => { toast.remove(); untrackTheme(toast); if (panel._pdToast === toast) panel._pdToast = null; }, 4500);
   }
 
   function getFormatKind(format) {
@@ -319,53 +191,31 @@
     return 'muxed';
   }
 
-  function renderDropdown(dropdown, data, context, panel) {
-    dropdown.replaceChildren();
-    let filter = 'all';
-    let query = '';
-
-    const search = document.createElement('input');
-    search.className = 'pd-quality-search';
-    search.placeholder = PD.I18n.t('ytSearchPlaceholder');
-    search.addEventListener('input', event => {
-      query = event.target.value.toLowerCase();
-      draw();
-    });
-    for (const eventName of ['keydown', 'keyup', 'keypress']) {
-      search.addEventListener(eventName, event => event.stopPropagation());
-    }
-    dropdown.appendChild(search);
-
-    const filterBar = document.createElement('div');
-    filterBar.className = 'pd-quality-filters';
-    const filters = [
-      ['all', 'ytFilterAll'],
-      ['muxed', 'ytFilterMuxed'],
-      ['video', 'ytFilterVideo'],
-      ['audio', 'ytFilterAudio']
-    ];
-
-    for (const [value, labelKey] of filters) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'pd-quality-filter-btn' + (value === 'all' ? ' active' : '');
-      button.dataset.filter = value;
-      button.textContent = PD.I18n.t(labelKey);
-      button.addEventListener('click', event => {
-        event.stopPropagation();
-        filterBar.querySelectorAll('.pd-quality-filter-btn').forEach(item => item.classList.remove('active'));
-        button.classList.add('active');
-        filter = value;
-        draw();
+  function renderDropdown(dropdown, data, context, panel, control) {
+    control.header();
+    let filter = 'all', query = '', sending = false;
+    const revision = control.revision();
+    const title = node('div', 'pd-quality-subtitle', data.title || context.title || '');
+    title.title = title.textContent; dropdown.append(title);
+    const search = node('input', 'pd-quality-search');
+    search.type = 'search'; search.placeholder = PD.I18n.t('ytSearchPlaceholder');
+    search.setAttribute('aria-label', PD.I18n.t('ytSearchPlaceholder'));
+    search.addEventListener('input', () => { query = search.value.toLowerCase(); draw(); });
+    dropdown.append(search);
+    const filterBar = node('div', 'pd-quality-filters');
+    filterBar.setAttribute('role', 'group'); filterBar.setAttribute('aria-label', PD.I18n.t('qaFilterFormats'));
+    for (const [value, key] of [['all', 'ytFilterAll'], ['muxed', 'ytFilterMuxed'], ['video', 'ytFilterVideo'], ['audio', 'ytFilterAudio']]) {
+      const button = node('button', 'pd-quality-filter-btn' + (value === 'all' ? ' active' : ''), PD.I18n.t(key));
+      button.type = 'button'; button.dataset.filter = value; button.setAttribute('aria-pressed', String(value === 'all'));
+      button.addEventListener('click', () => {
+        if (sending) return; filter = value;
+        filterBar.querySelectorAll('button').forEach(item => { item.classList.toggle('active', item === button); item.setAttribute('aria-pressed', String(item === button)); }); draw();
       });
-      filterBar.appendChild(button);
+      filterBar.append(button);
     }
-    dropdown.appendChild(filterBar);
-
-    const list = document.createElement('div');
-    list.className = 'pd-quality-list';
-    dropdown.appendChild(list);
-
+    dropdown.append(filterBar);
+    const list = node('div', 'pd-quality-list'), footer = node('div', 'pd-quality-footer');
+    dropdown.append(list, footer);
     function draw() {
       list.replaceChildren();
       const formats = (data.formats || []).filter(format => {
@@ -373,240 +223,309 @@
         if (filter === 'muxed' && kind === 'audio') return false;
         if (filter === 'video' && kind !== 'video') return false;
         if (filter === 'audio' && kind !== 'audio') return false;
-        if (!query) return true;
-        const label = [
-          format.height ? `${format.height}p` : 'audio',
-          format.ext || '', format.note || '', format.size || ''
-        ].join(' ').toLowerCase();
-        return label.includes(query);
+        return [format.height ? format.height + 'p' : 'audio', format.ext, format.note, format.size].join(' ').toLowerCase().includes(query);
       });
-
-      if (!formats.length) {
-        const empty = document.createElement('div');
-        empty.className = 'pd-quality-empty';
-        empty.textContent = PD.I18n.t('ytNoFormats');
-        list.appendChild(empty);
-        return;
-      }
-
+      if (!formats.length) list.append(node('div', 'pd-quality-empty', PD.I18n.t('ytNoFormats')));
+      footer.textContent = PD.I18n.t(formats.some(format => getFormatKind(format) === 'video') && filter !== 'video' ? 'qaMergeHint' : 'qaSendHint');
       for (const format of formats) {
-        const item = document.createElement('div');
-        item.className = 'pd-quality-item';
-
-        const kind = getFormatKind(format);
-        const quality = format.height ? `${format.height}p` : 'Audio';
+        const kind = getFormatKind(format), merged = kind === 'video' && filter !== 'video';
+        const quality = format.height ? format.height + 'p' : PD.I18n.t('popupMediaAudio');
         const ext = (format.ext || 'mp4').toUpperCase();
-        let note = format.note ? ` · ${format.note}` : '';
-        if (kind === 'video' && filter !== 'video') note = ' · ' + PD.I18n.t('ytFilterMuxed');
-
-        const label = document.createElement('span');
-        label.textContent = `${quality} ${ext}${note}`;
-        const size = document.createElement('span');
-        size.className = 'pd-quality-size';
-        size.textContent = format.size || '–';
-        item.append(label, size);
-
-        item.addEventListener('click', async event => {
-          event.stopPropagation();
-          dropdown.classList.remove('open');
-
-          let formatId = format.id;
-          if (kind === 'video' && filter !== 'video') formatId += '+bestaudio';
-
-          const isManifest = /\.(?:m3u8|mpd)(?:$|[?#])/i.test(context?.url || '');
+        const kindText = PD.I18n.t(kind === 'audio' ? 'ytFilterAudio' : kind === 'video' && !merged ? 'ytFilterVideo' : 'ytFilterMuxed');
+        const item = node('button', 'pd-quality-item'); item.type = 'button';
+        item.setAttribute('aria-label', quality + ' ' + ext + ' · ' + kindText);
+        const mark = node('span', 'pd-quality-format-icon'); mark.append(icon(kind === 'audio' ? 'audio' : 'video'));
+        const description = node('span', 'pd-quality-description');
+        description.append(node('strong', '', quality), node('small', '', ext + ' · ' + kindText));
+        item.append(mark, description, node('span', 'pd-quality-size', format.size || '—'), icon('download'));
+        item.addEventListener('click', async () => {
+          if (sending || revision !== control.revision()) return;
+          sending = true; dropdown.querySelectorAll('.pd-quality-item, .pd-quality-filter-btn').forEach(button => { button.disabled = true; });
+          search.disabled = true;
           const title = PD.MediaTitle?.resolve({
-            isManifest,
-            analyzedTitle: data.title,
-            contextTitle: context?.title,
-            pageTitle: data.pageTitle,
-            pageUrl: data.pageUrl,
-            mediaUrl: context?.url,
-            fallback: 'video'
-          }) || context?.title || data.title || 'video';
-          const filename = `${sanitizeName(title)}_${quality}.${format.ext || 'mp4'}`;
-          const response = await PDWebExt.runtime.sendMessage({
-            action: 'download_media_format',
-            url: context.url,
-            formatId,
-            filename,
-            title,
-            filesize: format.filesize || 0,
-            referer: context?.referer || location.href,
-            headers: context?.headers || undefined
-          });
-
-          showToast(
-            panel,
-            response?.success ? PD.I18n.t('ytAddedToQueue') : (response?.error || PD.I18n.t('ytDownloadError')),
-            !response?.success
-          );
+            isManifest: /\.(?:m3u8|mpd)(?:$|[?#])/i.test(context.url || ''),
+            analyzedTitle: data.title, contextTitle: context.title, pageTitle: data.pageTitle,
+            pageUrl: data.pageUrl, mediaUrl: context.url, fallback: 'video'
+          }) || context.title || data.title || 'video';
+          try {
+            const response = await PDWebExt.runtime.sendMessage({
+              action: 'download_media_format', url: data.analysisUrl || context.url, formatId: String(format.id) + (merged ? '+bestaudio' : ''),
+              filename: sanitizeName(title) + '_' + quality + '.' + (format.ext || 'mp4'),
+              title, filesize: merged ? 0 : (format.filesize || 0),
+              referer: context.referer || location.href, headers: context.headers || undefined
+            });
+            if (revision !== control.revision()) return;
+            if (!response?.success) throw new Error(response?.error || PD.I18n.t('ytDownloadError'));
+            control.close(); showToast(panel, PD.I18n.t('ytAddedToQueue'));
+          } catch (error) {
+            if (revision === control.revision()) showToast(panel, error?.message || PD.I18n.t('ytDownloadError'), true);
+          } finally {
+            sending = false; search.disabled = false;
+            dropdown.querySelectorAll('.pd-quality-item, .pd-quality-filter-btn').forEach(button => { button.disabled = false; });
+          }
         });
-        list.appendChild(item);
+        list.append(item);
       }
+      control.position();
     }
-
     draw();
   }
 
+  let activeController = null;
+  let nextPanelId = 0;
   function createPanel(options = {}) {
-    ensureTheme();
-    ensureStyle();
-
-    const panel = document.createElement('div');
-    panel.className = ['pd-quality-panel', 'pd-theme-root', options.fixed ? 'pd-quality-fixed' : '', options.className || '']
-      .filter(Boolean).join(' ');
-
-    const mainButton = document.createElement('button');
-    mainButton.type = 'button';
-    mainButton.className = 'pd-quality-main-btn';
-
-    const separator = document.createElement('div');
-    separator.className = 'pd-quality-sep';
-
-    const closeButton = document.createElement('button');
-    closeButton.type = 'button';
-    closeButton.className = 'pd-quality-close';
-    closeButton.title = PD.I18n.t('ytClose');
-    closeButton.textContent = '✕';
-
-    const dropdown = document.createElement('div');
-    dropdown.className = 'pd-quality-dropdown';
-    dropdown.append(document.createElement('div'));
-
-    panel.append(mainButton, separator, closeButton, dropdown);
-
-    let contextProvider = options.getContext || (() => null);
-    let outsideHandler = null;
-    let contextRevision = 0;
-
-    function setLoading(loading) {
-      const icon = document.createElement(loading ? 'div' : 'span');
-      icon.className = loading ? 'pd-quality-spinner' : 'pd-quality-icon';
-      const label = document.createElement('span');
-      label.className = 'pd-quality-label';
-      label.textContent = PD.I18n.t(loading ? 'ytAnalyzing' : 'ytDownloadThisVideo');
-      mainButton.replaceChildren(icon, label);
-      mainButton.disabled = loading;
+    ensureTheme(); ensureStyle();
+    const panel = node('div', ['pd-quality-panel', options.fixed ? 'pd-quality-fixed' : '', options.className || ''].filter(Boolean).join(' '));
+    panel.setAttribute('role', 'toolbar'); panel.setAttribute('aria-label', PD.I18n.t('qaToolbar'));
+    let contextProvider = options.getContext || (() => null), contextRevision = 0, destroyed = false;
+    let alignment = 'left', open = false, menuOpen = false;
+    const dropdown = node('div', 'pd-quality-dropdown'), menu = node('div', 'pd-quality-menu');
+    [panel, dropdown, menu].forEach(trackTheme);
+    let gestureActive = false, gestureTimer = 0;
+    const hoveredRoots = new Set();
+    function releaseGesture(event) {
+      document.removeEventListener('pointerup', releaseGesture, true);
+      document.removeEventListener('pointercancel', releaseGesture, true);
+      window.removeEventListener('blur', releaseGesture);
+      clearTimeout(gestureTimer);
+      gestureTimer = setTimeout(() => { gestureActive = false; }, event?.type === 'pointerup' ? 200 : 0);
     }
-
-    function closeDropdown() {
-      dropdown.classList.remove('open');
-      if (outsideHandler) document.removeEventListener('click', outsideHandler, true);
-      outsideHandler = null;
+    function holdGesture() {
+      clearTimeout(gestureTimer); gestureActive = true;
+      document.addEventListener('pointerup', releaseGesture, true);
+      document.addEventListener('pointercancel', releaseGesture, true);
+      window.addEventListener('blur', releaseGesture);
     }
-
-    function invalidateContext() {
-      contextRevision++;
-      closeDropdown();
-      setLoading(false);
+    dropdown.id = 'pd-quality-picker-' + (++nextPanelId); dropdown.setAttribute('role', 'dialog');
+    dropdown.setAttribute('aria-label', PD.I18n.t('qaChooseFile'));
+    function tool(name, cls, label, handler) {
+      const button = node('button', 'pd-quality-tool ' + cls); button.type = 'button';
+      button.title = PD.I18n.t(label); button.setAttribute('aria-label', button.title);
+      button.append(icon(name)); button.addEventListener('click', handler); return button;
     }
-
-    function openDropdown(data, context) {
-      renderDropdown(dropdown, data, context, panel);
-      dropdown.classList.add('open');
-      if (outsideHandler) document.removeEventListener('click', outsideHandler, true);
-      outsideHandler = event => {
-        if (!panel.contains(event.target)) closeDropdown();
-      };
-      setTimeout(() => document.addEventListener('click', outsideHandler, true), 0);
-    }
-
-    setLoading(false);
-
-    closeButton.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      invalidateContext();
-      options.onClose?.(panel);
+    const closeButton = tool('close', 'pd-quality-close', 'qaHideToolbar', () => { closeDropdown(); options.onClose?.(panel); });
+    const mainButton = tool('download', 'pd-quality-main-btn', 'qaChooseFile', () => open ? closeDropdown(true) : void openPicker());
+    const pipButton = tool('pip', 'pd-quality-pip', 'pipToggle', async () => {
+      if (pipButton.disabled) return;
+      pipButton.disabled = true;
+      try {
+        // The source is resolved synchronously so native PiP keeps the click's activation.
+        const media = options.getVideo?.();
+        if (!PD.PictureInPicture) throw new Error(PD.I18n.t('pipUnsupported'));
+        await PD.PictureInPicture.toggle(media);
+      } catch (error) { if (!destroyed) showToast(panel, error?.message || PD.I18n.t('pipFailed'), true); }
+      finally { pipButton.disabled = false; }
     });
-
-    mainButton.addEventListener('click', async event => {
-      event.preventDefault();
-      event.stopPropagation();
-
-      if (dropdown.classList.contains('open')) {
-        closeDropdown();
-        return;
+    const moreButton = tool('more', 'pd-quality-more', 'qaMore', () => {
+      const wasOpen = menuOpen; closeDropdown(); if (wasOpen) return;
+      activate(); menuOpen = true; menu.classList.add('open'); moreButton.setAttribute('aria-expanded', 'true');
+      layerHost(panel).append(menu); listen(); position(); menu.querySelector('button')?.focus();
+    });
+    mainButton.setAttribute('aria-haspopup', 'dialog'); mainButton.setAttribute('aria-controls', dropdown.id); mainButton.setAttribute('aria-expanded', 'false');
+    moreButton.setAttribute('aria-expanded', 'false');
+    for (const [key, action] of [['qaReanalyze', () => void openPicker(true)], ['qaHideToolbar', () => { closeDropdown(); options.onClose?.(panel); }]]) {
+      const button = node('button', '', PD.I18n.t(key)); button.type = 'button'; button.addEventListener('click', action); menu.append(button);
+    }
+    panel.append(closeButton, mainButton, pipButton, moreButton);
+    // Prevent player shortcuts and thumbnail navigation from receiving UI input.
+    for (const target of [panel, dropdown, menu]) {
+      // Track actual entry/exit, rather than relying exclusively on :hover
+      // being recomputed while the website removes its hover preview.
+      target.addEventListener('pointerenter', () => hoveredRoots.add(target));
+      target.addEventListener('pointerleave', () => hoveredRoots.delete(target));
+      target.addEventListener('pointerdown', holdGesture, true);
+      for (const name of ['click', 'dblclick', 'pointerdown', 'pointerup', 'mousedown', 'mouseup']) target.addEventListener(name, event => { event.stopPropagation(); if (name === 'click') event.preventDefault(); });
+      target.addEventListener('keydown', event => {
+        event.stopPropagation();
+        if (event.key === 'Escape') { event.preventDefault(); closeDropdown(true); }
+      });
+      for (const name of ['keyup', 'keypress']) target.addEventListener(name, event => event.stopPropagation());
+    }
+    function contains(target) { return target instanceof Node && (panel.contains(target) || dropdown.contains(target) || menu.contains(target)); }
+    function outside(event) { if (!contains(event.target)) closeDropdown(); }
+    function position() {
+      if (!panel.isConnected) { closeDropdown(); return; }
+      const host = layerHost(panel);
+      if (open && dropdown.parentElement !== host) host.append(dropdown);
+      if (menuOpen && menu.parentElement !== host) host.append(menu);
+      if (open) placeLayer(dropdown, panel, alignment);
+      if (menuOpen) placeLayer(menu, panel, alignment);
+    }
+    function scrolled(event) { if (!dropdown.contains(event.target) && !menu.contains(event.target)) position(); }
+    function fullscreenChanged() { if (open) layerHost(panel).append(dropdown); if (menuOpen) layerHost(panel).append(menu); position(); }
+    function listen() {
+      document.addEventListener('pointerdown', outside, true);
+      document.addEventListener('scroll', scrolled, true); window.addEventListener('resize', position);
+      document.addEventListener('fullscreenchange', fullscreenChanged);
+    }
+    function unlisten() {
+      document.removeEventListener('pointerdown', outside, true);
+      document.removeEventListener('scroll', scrolled, true); window.removeEventListener('resize', position);
+      document.removeEventListener('fullscreenchange', fullscreenChanged);
+    }
+    function closeDropdown(focus = false) {
+      contextRevision++; open = false; menuOpen = false; unlisten();
+      dropdown.classList.remove('open'); menu.classList.remove('open'); dropdown.remove(); menu.remove();
+      hoveredRoots.delete(dropdown); hoveredRoots.delete(menu);
+      mainButton.setAttribute('aria-expanded', 'false'); moreButton.setAttribute('aria-expanded', 'false');
+      mainButton.removeAttribute('aria-busy');
+      if (activeController === controller) activeController = null;
+      if (focus && panel.isConnected) mainButton.focus({ preventScroll: true });
+    }
+    function activate() { if (activeController && activeController !== controller) activeController.closeDropdown(); activeController = controller; }
+    function header() {
+      dropdown.replaceChildren(); const heading = node('div', 'pd-quality-heading');
+      const dismiss = tool('close', 'pd-quality-dismiss', 'ytClose', () => closeDropdown(true));
+      heading.append(node('span', 'pd-quality-dot'), node('strong', '', PD.I18n.t('qaChooseFile')), dismiss); dropdown.append(heading);
+    }
+    function loading() {
+      header(); const state = node('div', 'pd-quality-empty pd-quality-loading');
+      state.setAttribute('role', 'status'); state.append(node('span', 'pd-quality-spinner'), node('span', '', PD.I18n.t('qaAnalyzing')));
+      dropdown.append(state); position();
+    }
+    function sourceChoices(context, sources) {
+      if (!sources.length && !context?.blobUrl) return;
+      const revision = contextRevision;
+      const list = node('div', 'pd-quality-sources');
+      list.setAttribute('aria-label', PD.I18n.t('qaCapturedSources'));
+      if (sources.length) list.append(node('div', 'pd-quality-source-hint', PD.I18n.t('qaCapturedSources')));
+      for (const source of sources) {
+        const row = node('div', 'pd-quality-source');
+        let label;
+        try { const u = new URL(source.url); label = u.host + u.pathname; } catch { continue; }
+        const title = node('strong', '', (source.kind === 'hls' ? 'HLS' : source.kind === 'dash' ? 'DASH' : 'Video') + ' · ' + label);
+        // Do not expose query tokens in labels/tooltips.
+        title.title = title.textContent;
+        row.append(title, node('small', '', PD.I18n.t(source.scope === 'tab' ? 'qaOtherTabSource' : 'qaPlayerSource')));
+        const actions = node('div', 'pd-quality-source-actions');
+        const inspect = node('button', '', PD.I18n.t('qaAnalyzeSource')); inspect.type = 'button';
+        inspect.addEventListener('click', () => { if (revision === contextRevision) void openPicker(true, source); });
+        const download = node('button', '', PD.I18n.t('qaDownloadSource')); download.type = 'button';
+        download.addEventListener('click', async () => {
+          if (download.disabled || revision !== contextRevision) return;
+          download.disabled = true;
+          try {
+            const result = await PDWebExt.runtime.sendMessage({ action: 'download_player_source',
+              candidateId: source.id, context: { pageUrl: context.pageUrl, frameUrl: context.frameUrl, mediaUrl: context.mediaUrl }, title: context.title });
+            if (revision !== contextRevision) return;
+            if (!result?.success) throw new Error(result?.error || PD.I18n.t('ytDownloadError'));
+            closeDropdown(true); showToast(panel, PD.I18n.t('ytAddedToQueue'));
+          } catch (error) { if (revision === contextRevision) showToast(panel, error?.message, true); }
+          finally { download.disabled = false; }
+        });
+        actions.append(inspect, download); row.append(actions); list.append(row);
       }
-
-      const requestRevision = ++contextRevision;
-
-      let context;
+      if (context?.blobUrl && PD.BlobMedia) {
+        const row = node('div', 'pd-quality-source');
+        row.append(node('small', '', PD.I18n.t('qaBlobHint')));
+        const button = node('button', 'pd-quality-blob-save', PD.I18n.t('qaSaveBlob')); button.type = 'button';
+        button.addEventListener('click', async () => {
+          if (button.disabled || revision !== contextRevision) return;
+          button.disabled = true;
+          try {
+            await PD.BlobMedia.save(options.getVideo?.(), context, () => revision === contextRevision && !destroyed);
+            if (revision !== contextRevision) return;
+            showToast(panel, PD.I18n.t('qaBlobRequested'));
+          } catch (error) { if (revision === contextRevision) showToast(panel, error?.message, true); }
+          finally { button.disabled = false; }
+        });
+        row.append(button); list.append(row);
+      }
+      dropdown.append(list); position();
+    }
+    function failure(context, text, sources = []) {
+      header(); dropdown.append(node('div', 'pd-quality-empty', text || PD.I18n.t('ytCannotAnalyze')));
+      const retry = node('button', 'pd-quality-retry', PD.I18n.t('qaRetry')); retry.type = 'button'; retry.addEventListener('click', () => void openPicker(true)); dropdown.append(retry);
+      if (context?.allowDirectFallback) {
+        const fallback = node('button', 'pd-quality-retry', PD.I18n.t('qaDirectDownload')); fallback.type = 'button';
+        fallback.addEventListener('click', async () => {
+          if (fallback.disabled) return; fallback.disabled = true; const revision = contextRevision;
+          const result = await downloadDirectFallback(context);
+          if (revision !== contextRevision) return;
+          fallback.disabled = false;
+          if (result?.success) { closeDropdown(true); showToast(panel, PD.I18n.t('ytAddedToQueue')); }
+          else showToast(panel, result?.error || PD.I18n.t('ytDownloadError'), true);
+        });
+        dropdown.append(fallback);
+      }
+      sourceChoices(context, sources); position();
+    }
+    async function openPicker(force = false, selectedSource = null) {
+      if (destroyed) return;
+      closeDropdown(); activate(); open = true;
+      const revision = ++contextRevision;
+      dropdown.classList.add('open'); layerHost(panel).append(dropdown);
+      mainButton.setAttribute('aria-expanded', 'true'); mainButton.setAttribute('aria-busy', 'true');
+      listen(); loading();
+      let context, sources = [];
       try {
         context = await contextProvider();
+        if (revision !== contextRevision || destroyed) return;
+        if (!context?.url) throw new Error(PD.I18n.t('ytCannotAnalyze'));
+        if (context.pageUrl) {
+          try {
+            const found = await PDWebExt.runtime.sendMessage({ action: 'get_player_sources',
+              context: { pageUrl: context.pageUrl, frameUrl: context.frameUrl, mediaUrl: context.mediaUrl } });
+            sources = Array.isArray(found?.sources) ? found.sources : [];
+          } catch (_) { /* Page analysis remains available when capture is offline. */ }
+          if (revision !== contextRevision || destroyed) return;
+        }
+        if (selectedSource) {
+          // Refresh registry metadata before analysis; stale rows cannot turn
+          // into requests for an unrelated or expired source.
+          const source = sources.find(item => item.id === selectedSource.id);
+          if (!source) throw new Error(PD.I18n.t('qaSourceExpired'));
+          context = { ...context, url: source.url, mediaUrl: source.url,
+            referer: source.referer || context.referer, headers: source.requestHeaders,
+            cacheKey: [context.cacheKey, source.id, source.url].join('|'), allowDirectFallback: false };
+        } else if ((context.frameUrl || (context.blobUrl && sources.some(source => ['hls', 'dash'].includes(source.kind))))
+            && sources.some(source => source.scope !== 'tab')) {
+          // Show captured streams immediately without waiting for an extractor
+          // to reject the embedding page. The user explicitly chooses a source.
+          header(); sourceChoices(context, sources);
+          const retry = node('button', 'pd-quality-retry', PD.I18n.t('qaRefreshSources')); retry.type = 'button';
+          retry.addEventListener('click', () => void openPicker(true)); dropdown.append(retry); position(); return;
+        }
+        const response = await analyze(context, force);
+        if (revision !== contextRevision || destroyed) return;
+        if (!response?.success || !response.formats?.length) throw new Error(response?.error || PD.I18n.t('ytCannotAnalyze'));
+        renderDropdown(dropdown, response, context, panel, { header, revision: () => contextRevision, close: () => closeDropdown(true), position });
+        if (document.activeElement === mainButton) dropdown.querySelector('input')?.focus({ preventScroll: true });
       } catch (error) {
-        if (requestRevision !== contextRevision) return;
-        showToast(panel, error?.message || PD.I18n.t('ytCannotAnalyze'), true);
-        return;
-      }
-
-      if (requestRevision !== contextRevision) return;
-
-      if (!context?.url) {
-        showToast(panel, PD.I18n.t('ytCannotAnalyze'), true);
-        return;
-      }
-
-      setLoading(true);
-      let response = null;
-      try {
-        response = await analyze(context);
-      } catch (_) { }
-
-      if (requestRevision !== contextRevision) return;
-
-      if (response?.success && Array.isArray(response.formats) && response.formats.length) {
-        setLoading(false);
-        openDropdown(response, context);
-        return;
-      }
-
-      const fallbackResponse = await downloadDirectFallback(context);
-      if (requestRevision !== contextRevision) return;
-      setLoading(false);
-
-      if (fallbackResponse?.success) {
-        showToast(panel, PD.I18n.t('ytAddedToQueue'));
-      } else {
-        showToast(
-          panel,
-          fallbackResponse ? PD.I18n.t('ytDownloadError') : PD.I18n.t('ytCannotAnalyze'),
-          true
-        );
-      }
-    });
-
-    return {
+        if (revision === contextRevision && !destroyed) failure(context, error?.message, sources);
+      } finally { if (revision === contextRevision) mainButton.removeAttribute('aria-busy'); }
+    }
+    const controller = {
       element: panel,
-      setContextProvider(provider) {
-        invalidateContext();
-        contextProvider = provider || (() => null);
+      setContextProvider(provider) { closeDropdown(); contextProvider = provider || (() => null); },
+      setDropdownAlignment(value) { alignment = value === 'right' ? 'right' : 'left'; position(); },
+      invalidateContext() {
+        // A new pointer-selected card releases focus and the previous gesture
+        // as well as closing its list; otherwise focus can pin the old owner.
+        if (contains(document.activeElement)) document.activeElement.blur?.();
+        closeDropdown(); hoveredRoots.clear();
+        releaseGesture(); clearTimeout(gestureTimer); gestureActive = false;
       },
-      setDropdownAlignment(alignment) {
-        panel.classList.toggle('pd-quality-align-left', alignment === 'left');
-      },
-      invalidateContext,
       closeDropdown,
-      isDropdownOpen() {
-        return dropdown.classList.contains('open');
-      },
-      isInteractionActive() {
-        const active = document.activeElement;
-        return dropdown.classList.contains('open')
-          || panel.matches?.(':hover')
-          || (active instanceof Node && panel.contains(active));
-      },
-      containsTarget(target) {
-        return target instanceof Node && panel.contains(target);
-      },
-      showToast(message, error = false) { showToast(panel, message, error); }
+      openPicker,
+      isDropdownOpen() { return open || menuOpen; },
+      isGestureActive() { return gestureActive; },
+      isPointerInteractionActive() { return gestureActive || hoveredRoots.size > 0 || panel.matches?.(':hover'); },
+      isInteractionActive() { return hoveredRoots.size > 0 || gestureActive || open || menuOpen || contains(document.activeElement) || panel.matches?.(':hover'); },
+      containsTarget: contains,
+      showToast(message, error = false) { showToast(panel, message, error); },
+      destroy() {
+        destroyed = true; releaseGesture(); clearTimeout(gestureTimer); gestureActive = false;
+        hoveredRoots.clear();
+        closeDropdown(); panel._pdToast?.remove();
+        [panel, dropdown, menu, panel._pdToast].forEach(untrackTheme); panel.remove();
+      }
     };
+    return controller;
   }
 
   PD.QualityAnalyzer = {
-    analyze,
-    createPanel,
-    sanitizeName,
+    analyze, createPanel, sanitizeName,
     clearCache() { cache.clear(); }
   };
 })(globalThis);

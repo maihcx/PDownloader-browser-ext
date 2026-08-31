@@ -226,6 +226,8 @@
       referer: metadata.referer || details.documentUrl || details.initiator || '',
       pageUrl: details.documentUrl || metadata.referer || details.initiator || '',
       source: 'network',
+      frameId: details.frameId,
+      documentId: details.documentId,
       requestType: details.type,
       likelySegment,
       requestHeaders: { ...(metadata.requestHeaders || {}) },
@@ -280,8 +282,8 @@
     if (!candidate?.url) return null;
 
     const classification = classify(candidate.url, candidate.mime || '', '', 'media', candidate.mediaType || 'video');
-    const mediaType = candidate.mediaType || classification?.mediaType || 'unknown';
-    const kind = candidate.kind || classification?.kind || 'direct';
+    const mediaType = classification?.mediaType === 'manifest' ? 'manifest' : candidate.mediaType || classification?.mediaType || 'unknown';
+    const kind = classification?.mediaType === 'manifest' ? classification.kind : candidate.kind || classification?.kind || 'direct';
     const extension = candidate.extension || classification?.extension || extensionOf(candidate.url);
     const likelySegment = isLikelySegment(candidate.url, extension, Number(candidate.size) || 0, 'media');
     const source = candidate.source || 'dom';
@@ -370,9 +372,42 @@
         ? state.activeVideoUrls.filter(url => /^https?:/i.test(String(url || ''))).slice(0, 8)
         : [],
       pageUrl: state?.pageUrl || '',
+      documentId: state?.documentId || '',
       updatedAt: Date.now()
     });
     scheduleNotify(tabId);
+  }
+
+  // A frame match is a grouping hint, not proof of which of several players
+  // owns a request. The UI must ask the user to choose; never download a
+  // tab-wide highest-scoring candidate automatically.
+  function getPlayerSources(tabId, context = {}, senderFrameId = 0) {
+    aggregatePlaybackState(tabId); // expire stale frame reports
+    const frames = playbackStateByTab.get(tabId) || new Map();
+    const targetPage = context.frameUrl || context.pageUrl || '';
+    const normalize = value => { try { const u = new URL(value); u.hash = ''; return u.href; } catch { return ''; } };
+    const page = normalize(targetPage);
+    const frameIds = context.frameUrl
+      ? [...frames].filter(([, state]) => normalize(state.pageUrl) === page).map(([id]) => id)
+      : [senderFrameId];
+    return Registry.getAll(tabId, { mediaType: 'video', minScore: 35, includeSegments: false }).map(candidate => {
+      const observations = (candidate.observations || []).filter(item => {
+        const state = frames.get(item.frameId);
+        if (state?.documentId && item.documentId && state.documentId !== item.documentId) return false;
+        // Exact document URLs can invalidate old same-frame requests. An
+        // origin-only Referer is not sufficient evidence of navigation.
+        if (!state?.pageUrl || !item.pageUrl) return true;
+        try { if (new URL(item.pageUrl).pathname === '/') return true; } catch { return true; }
+        return normalize(state.pageUrl) === normalize(item.pageUrl);
+      });
+      if (candidate.observations?.length && !observations.length) return null;
+      const match = observations.find(item => frameIds.includes(item.frameId))
+        || observations.find(item => page && normalize(item.pageUrl) === page);
+      const exact = !!context.mediaUrl && normalize(candidate.url) === normalize(context.mediaUrl);
+      const scoped = match ? { ...candidate, referer: match.referer || candidate.referer,
+        requestHeaders: { ...match.requestHeaders } } : candidate;
+      return { ...scoped, scope: exact ? 'exact' : match ? 'frame' : 'tab' };
+    }).filter(Boolean).sort((a, b) => ({ exact: 0, frame: 1, tab: 2 }[a.scope] - { exact: 0, frame: 1, tab: 2 }[b.scope]));
   }
 
   function init() {
@@ -445,6 +480,7 @@
     init,
     classify,
     registerContentCandidate,
+    getPlayerSources,
     updatePlaybackState,
     getPlaybackState(tabId) {
       return aggregatePlaybackState(tabId);

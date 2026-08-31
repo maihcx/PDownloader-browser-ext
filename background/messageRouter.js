@@ -157,7 +157,7 @@
 
   const handlers = {
     ping_app(_msg, _sender, sendResponse) {
-      Api.ping().then(ok => sendResponse({ connected: ok }));
+      Api.ping(true).then(ok => sendResponse({ connected: ok }));
       return true;
     },
 
@@ -197,7 +197,7 @@
     },
 
     get_popup_init(_msg, _sender, sendResponse) {
-      Promise.all([Api.ping(), Storage.getSettings()]).then(([connected, settings]) => {
+      Promise.all([Api.ping(true), Storage.getSettings()]).then(([connected, settings]) => {
         sendResponse({ connected, interceptCount: State.getInterceptCount(), settings });
       });
       return true;
@@ -239,14 +239,17 @@
 
     register_media_candidate(msg, sender, sendResponse) {
       const tabId = sender.tab?.id ?? -1;
-      const candidate = MediaCapture.registerContentCandidate(tabId, msg.candidate || {});
+      const candidate = MediaCapture.registerContentCandidate(tabId, { ...(msg.candidate || {}),
+        frameId: sender.frameId ?? 0, documentId: sender.documentId || '',
+        pageUrl: sender.url || msg.candidate?.pageUrl || '' });
       sendResponse({ success: !!candidate, candidate });
       return false;
     },
 
     update_media_playback_state(msg, sender, sendResponse) {
       const tabId = sender.tab?.id ?? -1;
-      MediaCapture.updatePlaybackState(tabId, sender.frameId ?? 0, msg.state || {});
+      MediaCapture.updatePlaybackState(tabId, sender.frameId ?? 0, { ...(msg.state || {}),
+        pageUrl: sender.url || msg.state?.pageUrl || '', documentId: sender.documentId || '' });
       sendResponse({ success: tabId >= 0 });
       return false;
     },
@@ -275,6 +278,20 @@
       });
       sendResponse({ candidates, playback: MediaCapture.getPlaybackState(tabId) });
       return false;
+    },
+
+    get_player_sources(msg, sender, sendResponse) {
+      sendResponse({ sources: MediaCapture.getPlayerSources(sender.tab?.id ?? -1, msg.context, sender.frameId ?? 0) });
+      return false;
+    },
+
+    download_player_source(msg, sender, sendResponse) {
+      const tabId = sender.tab?.id ?? -1;
+      const candidate = MediaCapture.getPlayerSources(tabId, msg.context, sender.frameId ?? 0)
+        .find(item => item.id === msg.candidateId);
+      downloadCandidate(candidate, msg.title || sender.tab?.title || '', tabId, sender.tab?.url || '')
+        .then(sendResponse).catch(error => sendResponse({ success: false, error: error?.message }));
+      return true;
     },
 
     get_best_media_candidate(msg, sender, sendResponse) {

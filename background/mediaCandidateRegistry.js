@@ -22,7 +22,8 @@
   }
 
   function cloneCandidate(candidate) {
-    return candidate ? { ...candidate, requestHeaders: { ...(candidate.requestHeaders || {}) } } : null;
+    return candidate ? { ...candidate, requestHeaders: { ...(candidate.requestHeaders || {}) },
+      observations: (candidate.observations || []).map(item => ({ ...item, requestHeaders: { ...item.requestHeaders } })) } : null;
   }
 
   function prune(tabId) {
@@ -111,6 +112,11 @@
       likelySegment: !!rawCandidate.likelySegment,
       route: rawCandidate.route || '',
       requestHeaders: { ...(rawCandidate.requestHeaders || {}) },
+      observations: Number.isInteger(rawCandidate.frameId) ? [{
+        frameId: rawCandidate.frameId, documentId: rawCandidate.documentId || '',
+        pageUrl: rawCandidate.pageUrl || '', referer: rawCandidate.referer || '',
+        requestHeaders: { ...(rawCandidate.requestHeaders || {}) }, lastSeenAt: now
+      }] : [],
       foundAt: Number(rawCandidate.foundAt) || now,
       lastSeenAt: now
     };
@@ -121,8 +127,18 @@
     let stored;
     if (existing) {
       const originalId = existing.id;
+      const observations = [...(existing.observations || [])];
+      for (const observation of candidate.observations) {
+        const index = observations.findIndex(item => item.frameId === observation.frameId
+          && item.documentId === observation.documentId);
+        if (index < 0) observations.push(observation);
+        else observations[index] = { ...observations[index], ...observation,
+          referer: observation.referer || observations[index].referer,
+          requestHeaders: { ...observations[index].requestHeaders, ...observation.requestHeaders } };
+      }
       Object.assign(existing, candidate, {
         id: originalId,
+        observations: observations.filter(item => item.lastSeenAt >= now - CANDIDATE_TTL_MS).slice(-16),
         foundAt: Math.min(existing.foundAt || now, candidate.foundAt || now),
         lastSeenAt: now,
         score: Math.max(existing.score || 0, candidate.score || 0),

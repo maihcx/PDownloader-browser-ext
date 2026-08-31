@@ -59,6 +59,11 @@ for (const file of walk(root, file => /\.json$/i.test(file))) {
 const manifest = JSON.parse(read(path.join(root, 'manifest.json')));
 
 assertFile(manifest.action?.default_popup, 'manifest.action');
+const popupHtml = read(path.join(root, manifest.action.default_popup));
+for (const match of popupHtml.matchAll(/(?:src|href)=["']([^"']+)["']/g)) {
+  const resource = path.posix.normalize(path.posix.join(path.posix.dirname(manifest.action.default_popup), match[1]));
+  assertFile(resource, 'popup HTML');
+}
 for (const icon of Object.values(manifest.icons || {})) assertFile(icon, 'manifest.icons');
 for (const icon of Object.values(manifest.action?.default_icon || {})) assertFile(icon, 'manifest.action.default_icon');
 for (const script of manifest.content_scripts || []) {

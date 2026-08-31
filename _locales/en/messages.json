@@ -1,4 +1,259 @@
 {
+  "qaCapturedSources": { "message": "Captured media sources" },
+  "qaOtherTabSource": { "message": "Other source in this tab — verify before downloading" },
+  "qaPlayerSource": { "message": "Source captured in this player/frame" },
+  "qaAnalyzeSource": { "message": "Analyze quality" },
+  "qaDownloadSource": { "message": "Send source to PDownloader" },
+  "qaRefreshSources": { "message": "Refresh sources" },
+  "qaSourceExpired": { "message": "This source is no longer available. Refresh the list." },
+  "qaBlobHint": { "message": "Local file: save with the browser. Streaming blobs require a captured HLS/DASH or HTTP source." },
+  "qaSaveBlob": { "message": "Save local video with browser" },
+  "qaBlobRequested": { "message": "Browser save requested." },
+  "qaBlobChanged": { "message": "The selected video has changed. Reopen the picker." },
+  "qaBlobUnavailable": { "message": "This blob is not a readable video file (it may be a stream). Play the video, then refresh captured sources." },
+  "popupCompanion": {
+    "message": "Browser companion"
+  },
+  "popupExpand": {
+    "message": "Open expanded view"
+  },
+  "popupRetry": {
+    "message": "Check connection again"
+  },
+  "popupConnectionHelp": {
+    "message": "Open PDownloader on your computer, then retry. You can still browse and copy detected links."
+  },
+  "popupNavigation": {
+    "message": "Main navigation"
+  },
+  "popupFiles": {
+    "message": "Files"
+  },
+  "popupSettings": {
+    "message": "Settings"
+  },
+  "popupRescan": {
+    "message": "Rescan this page"
+  },
+  "popupSearch": {
+    "message": "Search files or links…"
+  },
+  "popupFilterType": {
+    "message": "Filter by file type"
+  },
+  "popupAll": {
+    "message": "All"
+  },
+  "popupDocuments": {
+    "message": "Documents"
+  },
+  "popupSort": {
+    "message": "Sort files"
+  },
+  "popupSortDetected": {
+    "message": "Detected"
+  },
+  "popupSortName": {
+    "message": "Name A–Z"
+  },
+  "popupSortSize": {
+    "message": "Largest first"
+  },
+  "popupSelectVisible": {
+    "message": "Select visible"
+  },
+  "popupSendSelected": {
+    "message": "Send selected"
+  },
+  "popupBatchHelp": {
+    "message": "Keep this view open until sending finishes. Downloads continue in the desktop app."
+  },
+  "popupCaptureRules": {
+    "message": "File capture rules"
+  },
+  "popupMinSize": {
+    "message": "Catch other files at or above"
+  },
+  "popupMinSizeHelp": {
+    "message": "Also catch files by size. Set 0 to disable this rule. Listed extensions and supported MIME types are still caught regardless of size."
+  },
+  "popupExtensions": {
+    "message": "File extensions"
+  },
+  "popupExtensionsHelp": {
+    "message": "Separate with commas or spaces. Wildcards such as mp* are supported."
+  },
+  "popupRestoreRules": {
+    "message": "Use defaults"
+  },
+  "popupSaveRules": {
+    "message": "Save rules"
+  },
+  "popupDomainPlaceholder": {
+    "message": "Domain, e.g. example.com"
+  },
+  "popupAdd": {
+    "message": "Add"
+  },
+  "popupAppearance": {
+    "message": "Appearance"
+  },
+  "popupThemeSystem": {
+    "message": "System"
+  },
+  "popupThemeLight": {
+    "message": "Light"
+  },
+  "popupThemeDark": {
+    "message": "Dark"
+  },
+  "popupRequestTimeout": {
+    "message": "No confirmation received. Check PDownloader before trying again to avoid duplicate downloads."
+  },
+  "popupBackgroundError": {
+    "message": "The extension did not respond. Reopen this view or reload the extension."
+  },
+  "popupConnected": {
+    "message": "Connected to PDownloader"
+  },
+  "popupDisconnected": {
+    "message": "PDownloader is not connected"
+  },
+  "popupSelectionCount": {
+    "message": "$FIRST$ selected",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupResultCount": {
+    "message": "$FIRST$ / $SECOND$ files",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      },
+      "second": {
+        "content": "$2"
+      }
+    }
+  },
+  "popupScanning": {
+    "message": "Looking for files…"
+  },
+  "popupScanFailed": {
+    "message": "Could not refresh files"
+  },
+  "popupUnsupportedPage": {
+    "message": "Page not supported"
+  },
+  "popupNoMatches": {
+    "message": "No matching files"
+  },
+  "popupNoFiles": {
+    "message": "No files detected yet"
+  },
+  "popupNoMatchesHelp": {
+    "message": "Try another keyword or file type."
+  },
+  "popupEmptyHelp": {
+    "message": "Play a video or audio file, or open a PDF, then rescan. Internal browser pages cannot be scanned."
+  },
+  "popupSelectFile": {
+    "message": "Select $FIRST$",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupUnknownSize": {
+    "message": "Size unknown"
+  },
+  "popupSent": {
+    "message": "Sent to PDownloader"
+  },
+  "popupSending": {
+    "message": "Sending…"
+  },
+  "popupCopyLink": {
+    "message": "Copy link: $FIRST$",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupSendFile": {
+    "message": "Send to PDownloader: $FIRST$",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupCopied": {
+    "message": "Link copied"
+  },
+  "popupCopyFailed": {
+    "message": "Could not copy the link. Check clipboard access."
+  },
+  "popupBatchResult": {
+    "message": "Sent $FIRST$ of $SECOND$ files. Unsent files remain selected.",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      },
+      "second": {
+        "content": "$2"
+      }
+    }
+  },
+  "popupSourceClosed": {
+    "message": "The source tab is no longer available."
+  },
+  "popupRescanHelp": {
+    "message": "Could not rescan the page. Reload the source tab, play the media and try again; captured network files remain available."
+  },
+  "popupInheritedBlock": {
+    "message": "Blocked by $FIRST$. Remove that rule below to enable capture.",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupRemoveDomain": {
+    "message": "Remove blocked domain: $FIRST$",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupSaveFailed": {
+    "message": "Could not save settings. Please try again."
+  },
+  "popupSaved": {
+    "message": "Settings saved"
+  },
+  "popupInvalidRules": {
+    "message": "Enter a non-negative size and valid extensions (letters, numbers or *)."
+  },
+  "popupDefaultsDraft": {
+    "message": "Defaults filled in. Choose Save rules to apply."
+  },
+  "popupInvalidDomain": {
+    "message": "Enter a valid domain without wildcards, credentials or a port."
+  },
+  "popupRecentCaught": {
+    "message": "$FIRST$ caught since last open",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
   "extName": {
     "message": "PDownloader"
   },
@@ -207,5 +462,62 @@
   },
   "contentAddingPdf": {
     "message": "Adding PDF…"
+  },
+  "qaToolbar": {
+    "message": "Video controls"
+  },
+  "qaHideToolbar": {
+    "message": "Hide controls for this video"
+  },
+  "qaChooseFile": {
+    "message": "Choose a file to download"
+  },
+  "qaMore": {
+    "message": "More options"
+  },
+  "qaReanalyze": {
+    "message": "Analyze formats again"
+  },
+  "qaAnalyzing": {
+    "message": "Analyzing formats…"
+  },
+  "qaRetry": {
+    "message": "Try again"
+  },
+  "qaDirectDownload": {
+    "message": "Send current media source"
+  },
+  "qaFilterFormats": {
+    "message": "Filter formats"
+  },
+  "qaMergeHint": {
+    "message": "Video-only formats will be merged with audio by PDownloader. Size shown excludes added audio."
+  },
+  "qaSendHint": {
+    "message": "Select a format to send to PDownloader."
+  },
+  "pipToggle": {
+    "message": "Toggle picture-in-picture"
+  },
+  "pipFrameUnavailable": {
+    "message": "Cannot open PiP from this cross-origin frame. Open the embedded player directly."
+  },
+  "pipNoVideo": {
+    "message": "No video is available for picture-in-picture."
+  },
+  "pipUnsupported": {
+    "message": "This browser does not expose the PiP API. Use its built-in picture-in-picture control."
+  },
+  "pipPolicyBlocked": {
+    "message": "Picture-in-picture is blocked by browser or frame permissions."
+  },
+  "pipNotReady": {
+    "message": "Wait for video metadata to load, then click PiP again. Playback may be needed first."
+  },
+  "pipClickRequired": {
+    "message": "Click the PiP button directly to grant the required user interaction."
+  },
+  "pipFailed": {
+    "message": "Could not open picture-in-picture for this video."
   }
 }

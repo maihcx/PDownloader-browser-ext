@@ -1,88 +1,71 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8"/>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PDownloader</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-
-  <!-- Header -->
-  <div class="header">
-    <div class="header-icon">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-        <polyline points="7 10 12 15 17 10"/>
-        <line x1="12" y1="15" x2="12" y2="3"/>
-      </svg>
+  <div class="app-shell">
+    <header class="header">
+      <img src="../icons/icon48.png" width="34" height="34" alt="">
+      <div class="brand"><strong>PDownloader</strong><span data-i18n="popupCompanion"></span></div>
+      <button id="expandButton" class="icon-button" data-icon="expand" data-i18n-title="popupExpand"></button>
+    </header>
+    <div class="connection" id="statusCard" role="status">
+      <span class="status-dot" aria-hidden="true"></span>
+      <span id="statusText" data-i18n="popupStatusChecking"></span>
+      <button id="retryConnection" class="icon-button" data-icon="refresh" data-i18n-title="popupRetry"></button>
     </div>
-    <span class="header-title">PDownloader</span>
-    <span class="header-badge" id="badgeCount">0</span>
+    <p class="connection-help" id="connectionHelp" hidden data-i18n="popupConnectionHelp"></p>
+    <nav class="tabs" role="tablist" data-i18n-aria-label="popupNavigation">
+      <button id="filesTab" role="tab" aria-controls="filesPanel" aria-selected="true"><span data-icon="files"></span><span data-i18n="popupFiles"></span><span class="count" id="mediaCount">0</span></button>
+      <button id="settingsTab" role="tab" aria-controls="settingsPanel" aria-selected="false" tabindex="-1"><span data-icon="settings"></span><span data-i18n="popupSettings"></span></button>
+    </nav>
+    <main>
+      <section id="filesPanel" role="tabpanel" aria-labelledby="filesTab">
+        <div class="page-context"><span class="site-symbol" data-icon="globe"></span><div><strong id="pageDomain">—</strong><span id="pageTitle"></span></div><button id="rescanButton" class="icon-button" data-icon="refresh" data-i18n-title="popupRescan"></button></div>
+        <div class="search-field"><span data-icon="search"></span><input id="searchInput" type="search" data-i18n-placeholder="popupSearch" data-i18n-aria-label="popupSearch" autocomplete="off"></div>
+        <div class="filter-row"><div class="filters" role="group" data-i18n-aria-label="popupFilterType">
+          <button data-filter="all" aria-pressed="true" data-i18n="popupAll"></button>
+          <button data-filter="video" aria-pressed="false" data-i18n="popupMediaVideo"></button>
+          <button data-filter="audio" aria-pressed="false" data-i18n="popupMediaAudio"></button>
+          <button data-filter="document" aria-pressed="false" data-i18n="popupDocuments"></button>
+        </div><select id="sortOrder" data-i18n-aria-label="popupSort"><option value="detected" data-i18n="popupSortDetected"></option><option value="name" data-i18n="popupSortName"></option><option value="size" data-i18n="popupSortSize"></option></select></div>
+        <div class="list-heading"><label><input type="checkbox" id="selectAll"><span data-i18n="popupSelectVisible"></span></label><span id="resultCount"></span></div>
+        <div class="media-list" id="mediaList" aria-busy="true"></div>
+        <div class="batch-bar"><span id="selectionCount"></span><button id="downloadSelected" class="primary-button" disabled><span data-icon="download"></span><span data-i18n="popupSendSelected"></span></button></div>
+        <p class="batch-help" data-i18n="popupBatchHelp"></p>
+      </section>
+      <section id="settingsPanel" role="tabpanel" aria-labelledby="settingsTab" hidden>
+        <h2 data-i18n="popupSectionInterceptSettings"></h2>
+        <label class="toggle-row"><span><strong data-i18n="popupToggleAutoIntercept"></strong><small data-i18n="popupToggleAutoInterceptSub"></small></span><input type="checkbox" role="switch" id="autoIntercept" disabled></label>
+        <label class="toggle-row" id="autoInterceptSiteRow"><span><strong data-i18n="popupToggleAutoInterceptSite"></strong><small id="autoInterceptSiteSub"></small></span><input type="checkbox" role="switch" id="autoInterceptSite" disabled></label>
+        <label class="toggle-row"><span><strong data-i18n="popupToggleShowNotif"></strong><small data-i18n="popupToggleShowNotifSub"></small></span><input type="checkbox" role="switch" id="showNotifications" disabled></label>
+        <form id="captureForm">
+          <h2 data-i18n="popupCaptureRules"></h2>
+          <label class="field-label" for="minSize" data-i18n="popupMinSize"></label>
+          <div class="unit-field"><input id="minSize" type="number" min="0" max="1048576" step="any" required disabled><span>MB</span></div>
+          <p class="field-help" data-i18n="popupMinSizeHelp"></p>
+          <label class="field-label" for="extensionsInput" data-i18n="popupExtensions"></label>
+          <textarea id="extensionsInput" rows="3" spellcheck="false" required disabled></textarea>
+          <p class="field-help" data-i18n="popupExtensionsHelp"></p>
+          <div class="form-actions"><button class="text-button" id="restoreRules" type="button" data-i18n="popupRestoreRules" disabled></button><button class="secondary-button" id="saveRules" type="submit" data-i18n="popupSaveRules" disabled></button></div>
+        </form>
+        <h2 data-i18n="popupSectionBlacklist"></h2>
+        <form id="blacklistForm" class="inline-form"><input id="domainInput" type="text" data-i18n-placeholder="popupDomainPlaceholder" data-i18n-aria-label="popupDomainPlaceholder" required disabled><button class="secondary-button" id="addDomain" data-i18n="popupAdd" disabled></button></form>
+        <div id="blList" class="bl-list"></div>
+        <div class="appearance"><label for="themeSelect" data-i18n="popupAppearance"></label><select id="themeSelect"><option value="system" data-i18n="popupThemeSystem"></option><option value="light" data-i18n="popupThemeLight"></option><option value="dark" data-i18n="popupThemeDark"></option></select></div>
+      </section>
+    </main>
+    <div id="feedback" class="feedback" role="status" aria-live="polite" hidden></div>
+    <footer><span id="badgeCount"></span><span id="version"></span></footer>
   </div>
-
-  <!-- Status -->
-  <div class="status-card err" id="statusCard">
-    <span class="status-dot"></span>
-    <span class="status-text" id="statusText" data-i18n="popupStatusChecking">Đang kiểm tra...</span>
-  </div>
-
-  <!-- Stats -->
-  <div class="stat-row">
-    <div class="stat-box">
-      <div class="stat-val" id="interceptCount">0</div>
-      <div class="stat-lbl" data-i18n="popupSessionLabel">Phiên này</div>
-    </div>
-  </div>
-
-
-  <!-- Detected files -->
-  <div class="section-hd" data-i18n="popupSectionDetectedMedia">Detected files</div>
-  <div class="media-list" id="mediaList">
-    <div class="media-empty" data-i18n="popupDetectedMediaEmpty">No supported files detected on this page</div>
-  </div>
-
-  <!-- Settings -->
-  <div class="section-hd" data-i18n="popupSectionInterceptSettings">Cài đặt bắt link</div>
-
-  <div class="toggle-row">
-    <div>
-      <div class="toggle-lbl" data-i18n="popupToggleAutoIntercept">Tự động bắt link</div>
-      <div class="toggle-sub" data-i18n="popupToggleAutoInterceptSub">Chặn tải của trình duyệt, chuyển sang PDownloader</div>
-    </div>
-    <label class="sw">
-      <input type="checkbox" id="autoIntercept" checked/>
-      <span class="sw-track"></span>
-    </label>
-  </div>
-
-  <div class="toggle-row" id="autoInterceptSiteRow">
-    <div>
-      <div class="toggle-lbl" data-i18n="popupToggleAutoInterceptSite">Tự động bắt link ở trang web này</div>
-      <div class="toggle-sub" id="autoInterceptSiteSub" data-i18n="popupToggleAutoInterceptSiteSubDefault">Áp dụng riêng cho trang bạn đang mở</div>
-    </div>
-    <label class="sw">
-      <input type="checkbox" id="autoInterceptSite" checked/>
-      <span class="sw-track"></span>
-    </label>
-  </div>
-
-  <div class="toggle-row">
-    <div>
-      <div class="toggle-lbl" data-i18n="popupToggleShowNotif">Hiện thông báo</div>
-      <div class="toggle-sub" data-i18n="popupToggleShowNotifSub">Thông báo khi bắt được link</div>
-    </div>
-    <label class="sw">
-      <input type="checkbox" id="showNotifications" checked/>
-      <span class="sw-track"></span>
-    </label>
-  </div>
-
-  <!-- Blacklist -->
-  <div class="section-hd" data-i18n="popupSectionBlacklist">Trang bị chặn</div>
-  <div class="bl-list" id="blList"></div>
-
   <script src="../common/browserApi.js"></script>
   <script src="../common/i18n.js"></script>
+  <script src="../background/constants.js"></script>
+  <script src="popup-model.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -40,6 +40,10 @@
   }
 
   function getMediaUrl(element) {
+    // Do not report an inactive <source> when the selected source is a blob.
+    // Network capture and the local-file fallback handle that case separately.
+    if (element.currentSrc) return /^https?:/i.test(element.currentSrc) ? element.currentSrc : '';
+    if (/^blob:/i.test(element.src || '')) return '';
     const values = [
       element.currentSrc,
       element.src,
@@ -281,12 +285,12 @@
   }
 
   function canShowAudioButton(state) {
-    const hostname = location.hostname.toLowerCase();
-    const isYouTube = hostname === 'youtube.com'
-      || hostname.endsWith('.youtube.com')
-      || hostname === 'youtube-nocookie.com'
-      || hostname.endsWith('.youtube-nocookie.com');
-    if (!IS_TOP_FRAME || isYouTube) return false;
+    if (!IS_TOP_FRAME) return false;
+    // Video controls own the action while a visible video is present, on all hosts.
+    if ([...document.querySelectorAll('video')].some(video => {
+      const rect = video.getBoundingClientRect();
+      return rect.width >= 120 && rect.height >= 70 && rect.bottom > 0 && rect.top < innerHeight;
+    })) return false;
     if (state.playingVideo) return false;
     return state.playingAudio || (tabAudible && (!!bestAudioCandidate || isAudioFocusedPage()));
   }

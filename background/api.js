@@ -71,9 +71,11 @@
     return response;
   }
 
-  async function ping() {
+  async function ping(forceRefresh = false) {
     try {
-      await openSession();
+      // Explicit status checks must reach the app, not just reuse a token from
+      // before it closed. Other callers can still reuse the authenticated session.
+      await openSession(forceRefresh);
       return true;
     } catch (_) {
       sessionToken = null;

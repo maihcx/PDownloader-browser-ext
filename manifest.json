@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extName__",
-  "version": "0.4.3",
+  "version": "1.0.0",
   "description": "__MSG_extDescription__",
   "default_locale": "en",
   "permissions": [
@@ -40,33 +40,23 @@
         "common/browserApi.js",
         "common/i18n.js",
         "common/mediaTitle.js",
-        "content/siteUrlResolver.js",
+        "content/mediaContext.js",
+        "content/blobMedia.js",
         "content/mediaObserver.js",
         "content/pdfObserver.js",
+        "content/pictureInPicture.js",
         "content/qualityAnalyzer.js",
         "content/content.js"
       ],
       "all_frames": true,
-      "run_at": "document_end"
-    },
-    {
-      "matches": [
-        "*://*.youtube.com/*"
-      ],
-      "js": [
-        "common/browserApi.js",
-        "common/i18n.js",
-        "common/mediaTitle.js",
-        "content/qualityAnalyzer.js",
-        "content/youtube_content.js"
-      ],
       "run_at": "document_end"
     }
   ],
   "web_accessible_resources": [
     {
       "resources": [
-        "common/theme.css"
+        "common/theme.css",
+        "common/videoControls.css"
       ],
       "matches": [
         "<all_urls>"

@@ -1,25 +1,19 @@
 const VIDEO_CONTEXT_SELECTOR = [
   '[data-video-id]',
   '[aria-label="Video player"]',
-  '[data-e2e="recommend-list-item-container"]',
-  '[data-e2e="browse-video"]',
-  '[data-e2e="feed-video"]',
   '[data-testid*="video"]',
   'article',
   '[role="article"]'
 ].join(',');
 
-// Keep the CSS selector intentionally simple and provider-agnostic. Provider
-// recognition happens in JavaScript so a malformed/concatenated selector can
-// never break the whole scanner (for example `closest('video,${...}')`).
-const MEDIA_ELEMENT_SELECTOR = 'video,iframe';
+// One DOM scanner for every host. No provider/domain dispatch.
+const PLAYER_PLACEHOLDER_SELECTOR = '.html5-video-player,.jwplayer,.video-js,.dplayer,[data-video-player]';
+const MEDIA_ELEMENT_SELECTOR = 'video,iframe,' + PLAYER_PLACEHOLDER_SELECTOR;
 const MEDIA_CONTEXT_SELECTOR = [
   '[data-video-id]',
   '[aria-label="Video player"]',
   '[data-testid*="video"]',
   '[data-testid*="player"]',
-  '[data-e2e*="video"]',
-  '[data-e2e*="player"]',
   '[class*="video"]',
   '[class*="player"]',
   '[id*="video"]',
@@ -31,14 +25,13 @@ const MEDIA_CONTEXT_SELECTOR = [
   '[aria-modal="true"]'
 ].join(',');
 const MEDIA_MUTATION_ATTRIBUTES = [
-  'src', 'data-src', 'class', 'open', 'hidden', 'aria-hidden'
+  'src', 'data-src', 'poster', 'href', 'data-video-id', 'data-media-id',
+  'class', 'open', 'hidden', 'aria-hidden'
 ];
 const MEDIA_SURFACE_SELECTOR = [
   '[aria-label="Video player"]',
   '[data-testid*="player"]',
   '[data-testid*="video"]',
-  '[data-e2e*="player"]',
-  '[data-e2e*="video"]',
   '[class*="player"]',
   '[class*="video"]',
   '[id*="player"]',
@@ -50,6 +43,14 @@ let _activeMedia = null;
 let _activeContextNode = null;
 let _activePlayer = null;
 let _activeMediaKey = '';
+let _activeAnchor = null;
+let _activeIdentity = null;
+let _activeLinkedItem = null;
+// Explicit pointer selection outranks the previous preview's open picker.
+// Retain the next card while the site's shared preview is still loading it.
+let _pointerFeedAnchor = null;
+let _feedPointerInside = false;
+let _feedHideTimer = 0;
 let _btn = null;
 let _qualityPanel = null;
 let _dismissedMediaKey = '';
@@ -67,118 +68,6 @@ const IS_TOP_FRAME = window === window.top;
 const FRAME_MEDIA_MESSAGE = 'pdownloader:media-frame-state:v1';
 const _reportedMediaFrames = new WeakSet();
 const _reportedMediaFrameInfo = new WeakMap();
-
-function hostnameMatches(hostname, expected) {
-  const host = String(hostname || '').toLowerCase().replace(/^www\./, '');
-  const domain = String(expected || '').toLowerCase().replace(/^www\./, '');
-  return host === domain || host.endsWith(`.${domain}`);
-}
-
-function isYouTubeHost(hostname = location.hostname) {
-  const host = String(hostname || '').toLowerCase().replace(/^www\./, '');
-  return host === 'youtube.com'
-    || host.endsWith('.youtube.com')
-    || host === 'youtube-nocookie.com'
-    || host.endsWith('.youtube-nocookie.com')
-    || host === 'youtu.be'
-    || host.endsWith('.youtu.be');
-}
-
-function getYouTubeVideoId(rawUrl = location.href) {
-  let url;
-  try {
-    url = new URL(rawUrl, location.href);
-  } catch (_) {
-    return '';
-  }
-
-  const host = url.hostname.toLowerCase().replace(/^www\./, '');
-  const isYouTubeDomain = host === 'youtube.com'
-    || host.endsWith('.youtube.com')
-    || host === 'youtube-nocookie.com'
-    || host.endsWith('.youtube-nocookie.com');
-
-  if (host === 'youtu.be' || host.endsWith('.youtu.be')) {
-    const id = url.pathname.split('/').filter(Boolean)[0] || '';
-    return /^[A-Za-z0-9_-]{6,20}$/.test(id) ? id : '';
-  }
-
-  if (!isYouTubeDomain) return '';
-
-  const queryId = url.searchParams.get('v') || '';
-  if (/^[A-Za-z0-9_-]{6,20}$/.test(queryId)) return queryId;
-
-  const pathMatch = url.pathname.match(/^\/(?:embed|shorts|live)\/([A-Za-z0-9_-]{6,20})(?:[/?]|$)/i);
-  return pathMatch?.[1] || '';
-}
-
-function getCanonicalYouTubeUrl(rawUrl = location.href) {
-  const videoId = getYouTubeVideoId(rawUrl);
-  return videoId ? `https://www.youtube.com/watch?v=${videoId}` : '';
-}
-
-function isVimeoHost(hostname = location.hostname) {
-  const host = String(hostname || '').toLowerCase().replace(/^www\./, '');
-  return host === 'vimeo.com'
-    || host.endsWith('.vimeo.com');
-}
-
-function getVimeoVideoInfo(rawUrl = location.href) {
-  let url;
-  try {
-    url = new URL(rawUrl, location.href);
-  } catch (_) {
-    return null;
-  }
-
-  if (!isVimeoHost(url.hostname)) return null;
-
-  const pathParts = url.pathname.split('/').filter(Boolean);
-  let videoId = '';
-  let unlistedHash = '';
-
-  if (url.hostname.toLowerCase() === 'player.vimeo.com') {
-    if (pathParts[0]?.toLowerCase() !== 'video') return null;
-    videoId = pathParts[1] || '';
-    unlistedHash = url.searchParams.get('h') || '';
-  } else {
-    const videoIndex = pathParts[0]?.toLowerCase() === 'video' ? 1 : 0;
-    videoId = pathParts[videoIndex] || '';
-    unlistedHash = pathParts[videoIndex + 1] || url.searchParams.get('h') || '';
-  }
-
-  if (!/^\d+$/.test(videoId)) return null;
-  if (unlistedHash && !/^[A-Za-z0-9_-]+$/.test(unlistedHash)) {
-    unlistedHash = '';
-  }
-
-  return { videoId, unlistedHash };
-}
-
-function getCanonicalVimeoUrl(rawUrl = location.href) {
-  const info = getVimeoVideoInfo(rawUrl);
-  if (!info) return '';
-
-  return `https://vimeo.com/${info.videoId}`
-    + (info.unlistedHash ? `/${info.unlistedHash}` : '');
-}
-
-function getEmbeddingPageReferer() {
-  const referrer = String(document.referrer || '').trim();
-  if (window !== window.top && /^https?:\/\//i.test(referrer)) {
-    return referrer;
-  }
-
-  return '';
-}
-
-function usesDedicatedYouTubePanel() {
-  const host = location.hostname.toLowerCase();
-  const isRegularYouTube = host === 'youtube.com' || host.endsWith('.youtube.com');
-
-  return window === window.top && isRegularYouTube;
-}
-
 
 const _selectorValidityCache = new Map();
 
@@ -294,7 +183,6 @@ function getFrameSemanticScore(frame) {
 
   let score = 0;
   if (_reportedMediaFrames.has(frame)) score += 180;
-  if (getYouTubeVideoId(src) || getVimeoVideoInfo(src)) score += 100;
   if (/\b(?:video|player|media|stream|embed)\b/i.test(text)) score += 18;
   if (/\b(?:autoplay|fullscreen|picture-in-picture)\b/i.test(String(frame.getAttribute('allow') || ''))) score += 16;
 
@@ -317,7 +205,9 @@ function isLikelyMediaFrame(frame) {
 }
 
 function isMediaElement(element) {
-  return element instanceof HTMLVideoElement || isLikelyMediaFrame(element);
+  return element instanceof HTMLVideoElement || isLikelyMediaFrame(element)
+    || (element instanceof Element && safeMatches(element, PLAYER_PLACEHOLDER_SELECTOR)
+      && !element.querySelector('video,iframe'));
 }
 
 function getMediaSourceUrl(media) {
@@ -456,6 +346,14 @@ function getBtn() {
   _qualityPanel = PD.QualityAnalyzer.createPanel({
     fixed: true,
     getContext: () => resolveQualityContext(_activeMedia, _activeContextNode),
+    getVideo: () => {
+      if (_activeLinkedItem) {
+        const current = PD.MediaContext.getItemLink(_activeMedia);
+        if (!isLinkedItemCurrent() || !current
+            || !PD.MediaContext.linksMatch(current.url, _activeLinkedItem.url)) return null;
+      }
+      return _activeMedia?.isConnected ? _activeMedia : _activeAnchor;
+    },
     onClose: () => {
       _dismissedMediaKey = _activeMediaKey;
       hideButton(false);
@@ -474,130 +372,28 @@ function getBtn() {
   return _btn;
 }
 
-async function resolveQualityContext(media, contextNode) {
-  if (!media || !media.isConnected || !isMediaElement(media)) return null;
-
-  const hostname = location.hostname;
-  const mediaTitle = getMediaTitle(media, contextNode);
-  const directMediaUrl = media instanceof HTMLVideoElement ? getDirectMediaUrl(media) : '';
-  const embeddedUrl = media instanceof HTMLIFrameElement ? getFrameSource(media) : '';
-  const mediaKey = getMediaKey(media, contextNode);
-  const sourceUrl = embeddedUrl || location.href;
-  const embeddedYouTubeUrl = getCanonicalYouTubeUrl(sourceUrl);
-  const embeddedVimeoUrl = getCanonicalVimeoUrl(sourceUrl);
-  let url = '';
-  let referer = location.href;
-  let allowDirectFallback = true;
-
-  if (embeddedYouTubeUrl) {
-    url = embeddedYouTubeUrl;
-    allowDirectFallback = false;
-  } else if (embeddedVimeoUrl) {
-    url = embeddedVimeoUrl;
-    referer = media instanceof HTMLIFrameElement
-      ? location.href
-      : (getEmbeddingPageReferer() || location.href);
-    allowDirectFallback = false;
-  } else if (isYouTubeHost(hostname)) {
-    url = getCanonicalYouTubeUrl(location.href) || location.href;
-    allowDirectFallback = false;
-  } else if (isVimeoHost(hostname)) {
-    const embeddingReferer = getEmbeddingPageReferer();
-    url = getCanonicalVimeoUrl(location.href) || getSiteUrl(media, contextNode);
-    referer = embeddingReferer || location.href;
-    allowDirectFallback = false;
-  } else if (media instanceof HTMLIFrameElement) {
-    // Generic embed: analyze the iframe URL itself. The background media
-    // registry still provides HLS/DASH/direct candidates if the provider page
-    // is unsupported by the analyzer.
-    url = embeddedUrl || location.href;
-    referer = location.href;
-  } else {
-    const siteUrl = getSiteUrl(media, contextNode);
-    if (siteUrl && /^https?:\/\//i.test(siteUrl)) {
-      url = siteUrl;
-    }
-
-    const shouldPreferPageUrl = [
-      'tiktok.com', 'facebook.com', 'fb.watch', 'instagram.com',
-      'x.com', 'twitter.com', 'twitch.tv', 'reddit.com',
-      'bilibili.com', 'bilibili.tv', 'soundcloud.com'
-    ].some(host => hostnameMatches(hostname, host));
-
-    if (!shouldPreferPageUrl && (!url || url === location.href)) {
-      if (/^https?:\/\//i.test(directMediaUrl)) url = directMediaUrl;
-    }
-
-    const shouldUseCapturedMedia = !url
-      || url === location.href
-      || url.startsWith('blob:')
-      || /\.(?:m3u8|mpd)(?:$|[?#])/i.test(url);
-
-    if (!shouldPreferPageUrl && shouldUseCapturedMedia) {
-      const detected = await sendMessageSafe({
-        action: 'get_media_candidates',
-        mediaType: 'video',
-        minScore: 45
-      });
-
-      const candidates = Array.isArray(detected?.candidates)
-        ? detected.candidates.filter(candidate => /^https?:\/\//i.test(candidate?.url || ''))
-        : [];
-      const bestCandidate = candidates[0] || null;
-      const manifestCandidates = candidates.filter(candidate =>
-        candidate.kind === 'hls' || candidate.kind === 'dash');
-
-      let candidate = bestCandidate;
-      if (manifestCandidates.length) {
-        let bestOrigin = '';
-        try { bestOrigin = new URL(bestCandidate?.url || '').origin; } catch (_) { }
-        const bestManifestKind = ['hls', 'dash'].includes(bestCandidate?.kind)
-          ? bestCandidate.kind
-          : '';
-
-        const sameOriginManifests = bestOrigin
-          ? manifestCandidates.filter(item => {
-              try {
-                return new URL(item.url).origin === bestOrigin
-                  && (!bestManifestKind || item.kind === bestManifestKind);
-              } catch (_) {
-                return false;
-              }
-            })
-          : manifestCandidates;
-
-        candidate = [...(sameOriginManifests.length ? sameOriginManifests : manifestCandidates)]
-          .sort((a, b) =>
-            Number(b.lastSeenAt || b.foundAt || 0)
-            - Number(a.lastSeenAt || a.foundAt || 0))[0];
-      }
-
-      if (candidate?.url) {
-        url = candidate.url;
-        referer = candidate.referer || candidate.pageUrl || location.href;
-      }
-    }
-
-    if (!url || url === location.href || url.startsWith('blob:')) {
-      const manifest = await sendMessageSafe({ action: 'get_hls_manifest' });
-      if (manifest?.url && /^https?:\/\//i.test(manifest.url)) {
-        url = manifest.url;
-        referer = manifest.referer || location.href;
-      }
-    }
-
-    if (!url || url.startsWith('blob:')) url = location.href;
+function resolveQualityContext(media, contextNode) {
+  if (media === _activeMedia && _activeLinkedItem) {
+    if (!isLinkedItemCurrent()) return null;
+    // A feed card is the download target. The site's shared hover video may
+    // be unloaded/reused while the user searches formats or presses Download.
+    return PD.MediaContext.resolve(_activeLinkedItem.anchor, _activeLinkedItem.anchor, {
+      itemUrl: _activeLinkedItem.url, itemTitle: _activeLinkedItem.title,
+      mediaKey: _activeMediaKey
+    });
   }
-
-  return {
-    url,
-    cacheKey: `${url}|${mediaKey}|${directMediaUrl}|${embeddedUrl}|${mediaTitle}`,
-    title: mediaTitle,
-    referer,
-    mediaUrl: directMediaUrl,
-    mediaKey,
-    allowDirectFallback
-  };
+  // Preview nodes may be temporarily detached while the clicked toolbar is
+  // still in use. The visible, previously validated player remains its owner.
+  if (media === _activeMedia && !media?.isConnected
+      && isQualityPanelInteractionActive() && isElementVisuallyRendered(_activeAnchor, 120, 70)) {
+    media = _activeAnchor;
+  }
+  if (!media?.isConnected || (!isMediaElement(media) && media !== _activeAnchor)) return null;
+  return PD.MediaContext.resolve(media, contextNode, {
+    frameUrl: media instanceof HTMLIFrameElement ? getFrameSource(media) : '',
+    frameTitle: media instanceof HTMLIFrameElement ? _reportedMediaFrameInfo.get(media)?.title : '',
+    mediaKey: getMediaKey(media)
+  });
 }
 
 async function sendMessageSafe(message) {
@@ -669,29 +465,39 @@ function hideButton(clearActive = true) {
     _activeContextNode = null;
     _activePlayer = null;
     _activeMediaKey = '';
+    _activeAnchor = null;
+    _activeIdentity = null;
+    _activeLinkedItem = null;
   }
 }
 
 function positionBtn(media) {
-  const surface = getMediaRenderSurface(media);
+  if (media === _activeMedia && _activeMediaKey && _activeMediaKey === _dismissedMediaKey) return;
+  const surface = (media === _activeMedia && isLinkedItemCurrent() ? _activeLinkedItem.anchor : null)
+    || getMediaRenderSurface(media)
+    || (media === _activeMedia && isQualityPanelInteractionActive()
+      && isElementVisuallyRendered(_activeAnchor, 120, 70) ? _activeAnchor : null);
   if (!surface) {
     hideButton(true);
     return;
   }
 
+  // A scan/play event has just confirmed a live owner. An earlier pointer
+  // leave timeout must not hide it again after this successful reconciliation.
+  clearHide();
+
   const rect = surface.getBoundingClientRect();
   const btn = mountButtonForMedia(media);
 
   const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
-  const estimatedWidth = Math.max(btn.offsetWidth || 0, 176);
+  const estimatedWidth = Math.max(btn.offsetWidth || 0, 138);
   const top = clamp(rect.top + 10, 8, Math.max(8, window.innerHeight - 40));
-  const preferredRight = viewportWidth - rect.right + 12;
-  const right = clamp(preferredRight, 8, Math.max(8, viewportWidth - estimatedWidth - 8));
+  const left = clamp(rect.left + 12, 8, Math.max(8, viewportWidth - estimatedWidth - 8));
 
   btn.style.top = `${Math.round(top)}px`;
-  btn.style.left = 'auto';
-  btn.style.right = `${right}px`;
-  _qualityPanel?.setDropdownAlignment('right');
+  btn.style.left = `${Math.round(left)}px`;
+  btn.style.right = 'auto';
+  _qualityPanel?.setDropdownAlignment('left');
   showButton();
 }
 
@@ -722,6 +528,14 @@ function scheduleHide(delay = 450) {
   _hideTimer = setTimeout(() => {
     _hideTimer = null;
     if (isQualityPanelInteractionActive()) return;
+    // Pointer events stop reaching this document inside a cross-origin
+    // iframe. Leaving the parent document is therefore not evidence that the
+    // player disappeared. Use the same eligibility rule as automatic scans.
+    if (_activeMedia && _activeMediaKey !== _dismissedMediaKey
+        && isRenderedMedia(_activeMedia) && isTopmostAtCenter(_activeMedia)) {
+      positionBtn(_activeMedia);
+      return;
+    }
     hideButton(true);
   }, delay);
 }
@@ -733,87 +547,185 @@ function clearHide() {
   }
 }
 
-function getSiteUrl(media, contextNode) {
-  if (media instanceof HTMLVideoElement) {
-    return PD.SiteUrlResolver?.resolve(media, contextNode || media) || location.href;
-  }
-  return getFrameSource(media) || location.href;
-}
-
 function getMediaTitle(media, contextNode) {
-  if (media instanceof HTMLVideoElement) {
-    return PD.SiteUrlResolver?.getMediaTitle?.(media, contextNode || media)
-      || document.title
-      || 'video';
-  }
-
-  return String(
-    (media instanceof HTMLIFrameElement ? _reportedMediaFrameInfo.get(media)?.title : '')
-    || media?.getAttribute?.('title')
-    || media?.getAttribute?.('aria-label')
-    || contextNode?.getAttribute?.('aria-label')
-    || document.title
-    || 'video'
-  ).trim() || 'video';
+  return PD.MediaContext.getMediaTitle(media, contextNode);
 }
 
 function getDirectMediaUrl(media) {
-  if (!(media instanceof HTMLVideoElement)) return '';
-
-  const values = [
-    media.currentSrc,
-    media.src,
-    media.getAttribute('src')
-  ];
-
-  for (const source of safeQueryAll(media, 'source[src]')) {
-    values.push(source.src, source.getAttribute('src'));
-  }
-
-  return values.find(value => /^https?:\/\//i.test(String(value || ''))) || '';
+  return PD.MediaContext.getDirectMediaUrl(media);
 }
 
-function getMediaKey(media, contextNode = media) {
-  if (!(media instanceof Element)) return '';
+const _mediaIds = new WeakMap();
+let _nextMediaId = 0;
+function isLinkedItemCurrent() {
+  return !!_activeLinkedItem && _activeLinkedItem.pageUrl === location.href
+    && isElementVisuallyRendered(_activeLinkedItem.anchor, 120, 70)
+    && PD.MediaContext.linksMatch(_activeLinkedItem.url, PD.MediaContext.linkUrl(_activeLinkedItem.anchor));
+}
 
-  if (media instanceof HTMLIFrameElement) {
-    const values = [
-      'iframe',
-      getFrameSource(media),
-      media.id,
-      media.getAttribute('name'),
-      contextNode?.id,
-      contextNode?.getAttribute?.('data-video-id'),
-      contextNode?.getAttribute?.('data-media-id')
-    ].map(value => String(value || '').trim()).filter(Boolean);
-    return [...new Set(values)].join('|');
+function isLinkedItemPinned() {
+  return _activeMediaKey !== _dismissedMediaKey && isLinkedItemCurrent() && isQualityPanelInteractionActive();
+}
+
+function isFeedPreview(media) {
+  return media instanceof Element && !(media instanceof HTMLIFrameElement)
+    && !!safeClosest(media, '[class*="preview" i],[id*="preview" i]');
+}
+
+function matchesPointerFeedSelection(media) {
+  if (!_pointerFeedAnchor || !isFeedPreview(media)) return true;
+  if (!_feedPointerInside && !_qualityPanel?.isPointerInteractionActive?.()) return false;
+  const item = PD.MediaContext.getItemLink(media);
+  return isElementVisuallyRendered(_pointerFeedAnchor, 120, 70)
+    && !!item && PD.MediaContext.linksMatch(item.url, PD.MediaContext.linkUrl(_pointerFeedAnchor));
+}
+
+function clearFeedHide() {
+  clearTimeout(_feedHideTimer);
+  _feedHideTimer = 0;
+}
+
+function scheduleFeedHide() {
+  if (_feedHideTimer) return;
+  // Allow crossing the small gap between toolbar and portaled format list.
+  // An open list or retained keyboard focus alone must not pin a feed card.
+  _feedHideTimer = setTimeout(() => {
+    _feedHideTimer = 0;
+    if (_feedPointerInside || _qualityPanel?.isPointerInteractionActive?.()) return;
+    if (_activeLinkedItem || isFeedPreview(_activeMedia)) {
+      clearHide(); hideButton(true);
+    }
+  }, 240);
+}
+
+function selectPointedFeedCard(target, x, y) {
+  if (!_activeLinkedItem && !_pointerFeedAnchor) return;
+  if (isQualityPanelTarget(target) || _qualityPanel?.isGestureActive?.()) {
+    clearFeedHide(); return;
   }
 
-  if (!(media instanceof HTMLVideoElement)) return '';
+  const stack = document.elementsFromPoint?.(x, y) || [];
+  const links = [];
+  for (const element of new Set([target, ...stack])) {
+    if (links.some(link => PD.MediaContext.linkUrl(link) && isElementVisuallyRendered(link, 120, 70))) break;
+    const link = safeClosest(element, 'a[href]');
+    if (!link) {
+      // Card padding/metadata may itself be the pointer target. Stay within
+      // a compact single-thumbnail container instead of climbing into a grid.
+      let parent = element instanceof Element ? element : null;
+      for (let depth = 0; parent && depth < 5; depth++, parent = parent.parentElement) {
+        if (parent === document.body || parent === document.documentElement) break;
+        const images = [...safeQueryAll(parent, 'a[href]')].filter(candidate => candidate.querySelector('img,picture'));
+        if (images.length > 1) break;
+        if (images.length === 1) { links.push(images[0]); break; }
+      }
+      continue;
+    }
+    if (!PD.MediaContext.linkUrl(link)) continue;
+    if (link.querySelector('img,picture')) links.push(link);
+    else {
+      // Titles and thumbnails often use separate links in the same card.
+      // Find only an image link to that exact item in a compact ancestor.
+      let parent = link.parentElement;
+      for (let depth = 0; parent && depth < 5; depth++, parent = parent.parentElement) {
+        if (parent === document.body || parent === document.documentElement) break;
+        const images = [...safeQueryAll(parent, 'a[href]')].filter(candidate => candidate.querySelector('img,picture'));
+        if (images.length > 1) break;
+        if (images.length === 1 && PD.MediaContext.linksMatch(PD.MediaContext.linkUrl(link), PD.MediaContext.linkUrl(images[0]))) {
+          links.push(images[0]); break;
+        }
+      }
+    }
+  }
+  const currentAnchor = _activeLinkedItem?.anchor || _pointerFeedAnchor;
+  const card = links.find(link => PD.MediaContext.linkUrl(link) && isElementVisuallyRendered(link, 120, 70))
+    || (isElementVisuallyRendered(currentAnchor, 120, 70)
+      && containsPoint(currentAnchor.getBoundingClientRect(), x, y) ? currentAnchor : null);
+  if (!card) {
+    _feedPointerInside = false;
+    scheduleFeedHide();
+    return;
+  }
+  _feedPointerInside = true;
+  clearFeedHide();
+  const changed = _activeLinkedItem
+    ? card !== _activeLinkedItem.anchor
+      || !PD.MediaContext.linksMatch(_activeLinkedItem.url, PD.MediaContext.linkUrl(card))
+    : card !== _pointerFeedAnchor;
+  _pointerFeedAnchor = card;
+  if (changed) {
+    clearHide();
+    // Invalidating the controller also discards late analysis responses.
+    hideButton(true);
+  }
+}
 
-  const wrapper = safeClosest(media, '[id^="xgwrapper-"]');
-  const mediaNode = safeClosest(
-    media,
-    '[data-item-id],[data-video-id],[data-aweme-id],[data-e2e="feed-video"],[data-e2e="browse-video"]'
-  );
-  const values = [
-    'video',
-    wrapper?.id,
-    mediaNode?.getAttribute?.('data-item-id'),
-    mediaNode?.getAttribute?.('data-video-id'),
-    mediaNode?.getAttribute?.('data-aweme-id'),
-    mediaNode?.id,
-    contextNode?.getAttribute?.('data-item-id'),
-    contextNode?.getAttribute?.('data-video-id'),
-    contextNode?.getAttribute?.('data-aweme-id'),
-    media.currentSrc,
-    media.src,
-    media.getAttribute?.('src'),
-    media.poster,
-    media.getAttribute?.('poster')
-  ].map(value => String(value || '').trim()).filter(Boolean);
+function getMediaAnchor(media, item = PD.MediaContext.getItemLink(media)) {
+  if (!(media instanceof Element) || media instanceof HTMLIFrameElement) return media;
+  // Hover previews can be portaled outside the feed card and disappear when
+  // our toolbar receives the pointer. Use the player title link as well as a
+  // wrapping link: an <a> around the preview need not have an href at all.
+  if (item?.url) {
+    const rect = media.getBoundingClientRect();
+    const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+    const anchors = [...safeQueryAll(document, 'a[href]')].filter(candidate => {
+      if (candidate.contains(media) || !PD.MediaContext.linksMatch(item.url, PD.MediaContext.linkUrl(candidate))
+          || !candidate.querySelector('img,picture') || !isElementVisuallyRendered(candidate, 120, 70)) return false;
+      const box = candidate.getBoundingClientRect();
+      return rect.width >= 60 && rect.height >= 40 && x >= box.left && x <= box.right
+        && y >= box.top && y <= box.bottom && box.width <= rect.width * 1.6 && box.height <= rect.height * 1.6;
+    });
+    if (_pointerFeedAnchor && anchors.includes(_pointerFeedAnchor)) return _pointerFeedAnchor;
+    if (anchors.length === 1) return anchors[0];
+  }
+  if (media === _activeMedia && isLinkedItemCurrent()
+      && ((item && PD.MediaContext.linksMatch(item.url, _activeLinkedItem.url)) || isLinkedItemPinned())) {
+    return _activeLinkedItem.anchor;
+  }
+  if (_activeAnchor && _activeAnchor !== media && _activeAnchor.contains(media)
+      && safeQueryAll(_activeAnchor, 'video,iframe').length === 1) return _activeAnchor;
+  if (safeMatches(media, PLAYER_PLACEHOLDER_SELECTOR)) return media;
+  let parent = media.parentElement;
+  for (let depth = 0; parent && depth < 8; depth++, parent = parent.parentElement) {
+    if (parent === document.body || parent === document.documentElement) break;
+    if (safeMatches(parent, PLAYER_PLACEHOLDER_SELECTOR + ',' + MEDIA_SURFACE_SELECTOR)
+        && safeQueryAll(parent, 'video,iframe').length === 1) return parent;
+  }
+  return media;
+}
 
-  return [...new Set(values)].join('|');
+function getMediaIdentity(media, anchor = getMediaAnchor(media), item = PD.MediaContext.getItemLink(media)) {
+  const identityNode = safeClosest(anchor, '[data-video-id],[data-media-id]');
+  const article = safeClosest(anchor, 'article,[role="article"]');
+  const bookmarks = safeQueryAll(article, 'a[rel~="bookmark"][href]');
+  let source = media instanceof HTMLIFrameElement ? getFrameSource(media)
+    : media instanceof HTMLVideoElement ? (media.getAttribute('src') || media.currentSrc || getDirectMediaUrl(media)) : '';
+  if (source) {
+    try { source = new URL(source, location.href).href; } catch (_) {}
+  }
+  const linkedPreview = anchor?.localName === 'a' && anchor !== media && !anchor.contains(media);
+  return {
+    page: location.href,
+    item: identityNode?.getAttribute('data-video-id') || identityNode?.getAttribute('data-media-id') || '',
+    link: item?.url || PD.MediaContext.linkUrl(safeClosest(anchor, 'a[href]')) || (bookmarks.length === 1 ? PD.MediaContext.linkUrl(bookmarks[0]) : ''),
+    // Preview blob URLs change when the same card starts/stops hovering.
+    // The selected card link, rather than its disposable stream, owns identity.
+    source: linkedPreview ? '' : source,
+    poster: !linkedPreview && media instanceof HTMLVideoElement ? media.poster : ''
+  };
+}
+
+function identityChanged(previous, current) {
+  // Loading an empty src/poster for the first time is not another video.
+  // Keep known values across temporary emptied/replacement transitions.
+  return !!previous && Object.keys(current).some(key =>
+    previous[key] && current[key] && previous[key] !== current[key]);
+}
+
+function getMediaKey(media, identity = getMediaIdentity(media), anchor = getMediaAnchor(media)) {
+  if (!(media instanceof Element)) return '';
+  if (!_mediaIds.has(anchor)) _mediaIds.set(anchor, ++_nextMediaId);
+  return [_mediaIds.get(anchor), ...Object.values(identity)].join('|');
 }
 
 function clamp(value, min, max) {
@@ -891,19 +803,40 @@ function getMediaPlayerNode(target, media, contextNode) {
 }
 
 function activateMediaPlayer(media, target) {
+  if (media === _activeMedia && isLinkedItemPinned()) {
+    return { player: _activePlayer, mediaKey: _activeMediaKey };
+  }
   const contextNode = getMediaContextNode(target, media);
   const player = getMediaPlayerNode(target, media, contextNode);
-  const mediaKey = getMediaKey(media, contextNode);
-
-  if ((_activePlayer && player !== _activePlayer)
-      || (_activeMediaKey && mediaKey !== _activeMediaKey)) {
+  const item = PD.MediaContext.getItemLink(media);
+  const anchor = getMediaAnchor(media, item);
+  const identity = getMediaIdentity(media, anchor, item);
+  const sameItem = anchor === _activeAnchor && !identityChanged(_activeIdentity, identity);
+  if (_activeIdentity && !sameItem) {
     _qualityPanel?.invalidateContext?.();
   }
+  if (sameItem) {
+    for (const key of Object.keys(identity)) identity[key] ||= _activeIdentity?.[key] || '';
+  }
+  const mediaKey = getMediaKey(media, identity, anchor);
+  if (sameItem && _dismissedMediaKey === _activeMediaKey) _dismissedMediaKey = mediaKey;
 
   _activeMedia = media;
+  _activeAnchor = anchor;
+  _activeIdentity = identity;
   _activeContextNode = contextNode;
   _activePlayer = player;
   _activeMediaKey = mediaKey;
+  _activeLinkedItem = anchor?.localName === 'a' && anchor !== media && !anchor.contains(media)
+    && item?.url && PD.MediaContext.linksMatch(item.url, PD.MediaContext.linkUrl(anchor))
+    ? { anchor, url: item.url, title: item.title || getMediaTitle(media, contextNode), pageUrl: location.href }
+    : null;
+  if (_activeLinkedItem && !_pointerFeedAnchor) {
+    _pointerFeedAnchor = anchor;
+    _feedPointerInside = !!_lastPointerEvent
+      && containsPoint(anchor.getBoundingClientRect(), _lastPointerEvent.clientX, _lastPointerEvent.clientY);
+    if (!_feedPointerInside && !isQualityPanelInteractionActive()) scheduleFeedHide();
+  }
 
   return { player, mediaKey };
 }
@@ -1004,14 +937,20 @@ function getMediaUnderLastPointer() {
 }
 
 function activateDirectMedia(media, target = media) {
+  if (!matchesPointerFeedSelection(media)) return false;
+  if (isLinkedItemPinned()) {
+    if (media !== _activeMedia) return false;
+    positionBtn(_activeMedia); return true;
+  }
   if (!isRenderedMedia(media)) return false;
-  const context = getMediaContextNode(target, media);
-  const mediaKey = getMediaKey(media, context);
+  // Autoplay/hover in another player must not steal an in-progress click,
+  // native PiP request, or an open picker.
+  if (_activeAnchor && getMediaAnchor(media) !== _activeAnchor && isQualityPanelInteractionActive()) return false;
+  const { mediaKey } = activateMediaPlayer(media, target);
   if (mediaKey && mediaKey === _dismissedMediaKey) return false;
   if (_dismissedMediaKey && mediaKey !== _dismissedMediaKey) _dismissedMediaKey = '';
 
   clearHide();
-  activateMediaPlayer(media, target);
   positionBtn(media);
   return true;
 }
@@ -1021,11 +960,13 @@ function findProminentVisibleMedia() {
   const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
 
   for (const media of safeQueryAll(document, MEDIA_ELEMENT_SELECTOR)) {
+    if (!matchesPointerFeedSelection(media)) continue;
     const surface = getMediaRenderSurface(media);
     if (!surface) continue;
     const rect = surface.getBoundingClientRect();
     const area = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0))
       * Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+    if (area < 120 * 70 || !isTopmostAtCenter(media)) continue;
     const overlay = getOpenOverlayContainer(media);
     let score = (area / viewportArea) * 300;
 
@@ -1036,7 +977,7 @@ function findProminentVisibleMedia() {
       score += Math.min(180, Math.max(0, getFrameSemanticScore(media)));
       if (document.activeElement === media) score += 250;
     }
-    if (isTopmostAtCenter(media)) score += 120;
+    score += 120;
 
     candidates.push({ media, score, area });
   }
@@ -1045,13 +986,9 @@ function findProminentVisibleMedia() {
   const best = candidates[0];
   if (!best) return null;
 
-  // Auto-activation is intentionally conservative on normal pages, but an
-  // open overlay/dialog or an active/playing media element is enough. This
-  // catches dynamically inserted players without any Fancybox-specific code.
-  const autoEligible = !!getOpenOverlayContainer(best.media)
-    || document.activeElement === best.media
-    || (best.media instanceof HTMLVideoElement && !best.media.paused && !best.media.ended);
-  return autoEligible && best.score >= 250 ? best.media : null;
+  // Presence and visible geometry, not playback, decide eligibility.
+  // A paused/unloaded <video> behind its poster already has controls.
+  return best.media;
 }
 
 function getChildFrameForWindow(sourceWindow) {
@@ -1066,10 +1003,12 @@ function getChildFrameForWindow(sourceWindow) {
   return null;
 }
 
-function hasLocalRenderableMedia() {
+function hasLocalMedia() {
   for (const media of safeQueryAll(document, MEDIA_ELEMENT_SELECTOR)) {
-    if (media instanceof HTMLVideoElement && getMediaRenderSurface(media)) return true;
-    if (media instanceof HTMLIFrameElement && isLikelyMediaFrame(media) && getMediaRenderSurface(media)) return true;
+    // Report media presence, not whether its internal layer is currently
+    // painted. Players can hide/swap that layer while loading or starting
+    // playback. The parent independently validates the iframe's visibility.
+    if (isMediaElement(media)) return true;
   }
   return false;
 }
@@ -1079,7 +1018,7 @@ let _frameReportRaf = 0;
 function reportFrameMediaState(force = false) {
   if (IS_TOP_FRAME) return;
 
-  const hasMedia = hasLocalRenderableMedia();
+  const hasMedia = hasLocalMedia();
   const payload = {
     channel: FRAME_MEDIA_MESSAGE,
     hasMedia,
@@ -1119,7 +1058,8 @@ function handleFrameMediaMessage(event) {
   } else {
     _reportedMediaFrames.delete(frame);
     _reportedMediaFrameInfo.delete(frame);
-    if (_activeMedia === frame) hideButton(true);
+    // Reconcile below instead of tearing down a visible iframe immediately.
+    // A temporary empty media layer must not discard its toolbar or picker.
   }
 
   // A nested child report makes this iframe a media-bearing frame too. Top
@@ -1151,6 +1091,17 @@ function initFrameMediaReporter() {
   window.addEventListener('hashchange', () => queueFrameMediaReport(true));
   window.addEventListener('popstate', () => queueFrameMediaReport(true));
 
+  // A page may finish initializing its player without another observed DOM
+  // mutation. Deduplicated reports keep the parent in sync after that phase.
+  const reportTimer = setInterval(() => queueFrameMediaReport(false), 1000);
+  window.addEventListener('pagehide', event => {
+    if (!event.persisted) {
+      clearInterval(reportTimer);
+      observer.disconnect();
+      if (_frameReportRaf) cancelAnimationFrame(_frameReportRaf);
+    }
+  });
+
   queueFrameMediaReport(true);
 }
 
@@ -1158,17 +1109,40 @@ window.addEventListener('message', handleFrameMediaMessage, false);
 
 let _scanFrame = 0;
 function queueMediaScan() {
-  if (_scanFrame || usesDedicatedYouTubePanel()) return;
+  if (_scanFrame) return;
   _scanFrame = requestAnimationFrame(() => {
     _scanFrame = 0;
     if (_contextInvalidated) return;
 
-    if (_activeMedia && isRenderedMedia(_activeMedia)) {
-      positionBtn(_activeMedia);
+    // Pin the card before reconciling the disposable portal player. This is
+    // also the URL snapshot used by getContext, not just a visual workaround.
+    if (_activeLinkedItem && !isLinkedItemCurrent()) hideButton(true);
+    if (isLinkedItemPinned()) { positionBtn(_activeMedia); return; }
+
+    // A preview/player can create or replace its media node between pointerdown
+    // and click. Adopt that node before deciding to hide the stable toolbar.
+    if (_activeMedia && !isRenderedMedia(_activeMedia) && _activeAnchor?.isConnected) {
+      const replacements = [...safeQueryAll(_activeAnchor, 'video,iframe')].filter(isRenderedMedia);
+      if (replacements.length === 1) activateMediaPlayer(replacements[0], _activeAnchor);
+      else if (!replacements.length && isMediaElement(_activeAnchor) && isRenderedMedia(_activeAnchor)) {
+        activateMediaPlayer(_activeAnchor, _activeAnchor);
+      }
+    }
+    if (_activeMedia && isRenderedMedia(_activeMedia)
+        && (isQualityPanelInteractionActive() || isTopmostAtCenter(_activeMedia))) {
+      activateMediaPlayer(_activeMedia, _activeContextNode);
+      if (_activeMediaKey !== _dismissedMediaKey) positionBtn(_activeMedia);
       return;
     }
+    if (_activeMedia && isQualityPanelInteractionActive()
+        && isElementVisuallyRendered(_activeAnchor, 120, 70)) {
+      const current = getMediaIdentity(_activeAnchor, _activeAnchor);
+      if (!identityChanged(_activeIdentity, current)) {
+        clearHide(); positionBtn(_activeMedia); return;
+      }
+    }
 
-    if (_activeMedia && !_activeMedia.isConnected) hideButton(true);
+    if (_activeMedia) hideButton(true);
     const media = findProminentVisibleMedia();
     if (media) activateDirectMedia(media, media);
   });
@@ -1186,10 +1160,11 @@ function processPointerEvent() {
   const forceRefresh = _forcePointerRefresh;
   _forcePointerRefresh = false;
 
-  if (!_lastPointerEvent || _contextInvalidated || usesDedicatedYouTubePanel()) return;
+  if (!_lastPointerEvent || _contextInvalidated) return;
 
   const pointed = getMediaUnderLastPointer();
   const target = pointed?.target || _lastPointerEvent.target;
+  selectPointedFeedCard(target, _lastPointerEvent.clientX, _lastPointerEvent.clientY);
 
   // The quality panel is its own interaction surface. Never reinterpret
   // pointer movement over it as movement away from the active media, including
@@ -1209,7 +1184,7 @@ function processPointerEvent() {
 }
 
 function initListeners() {
-  if (!IS_TOP_FRAME || usesDedicatedYouTubePanel()) return;
+  if (!IS_TOP_FRAME) return;
 
   const rememberPointer = event => {
     _lastPointerEvent = {
@@ -1217,6 +1192,7 @@ function initListeners() {
       clientY: event.clientY,
       target: event.target
     };
+    selectPointedFeedCard(event.target, event.clientX, event.clientY);
   };
 
   document.addEventListener('pointermove', event => {
@@ -1228,6 +1204,7 @@ function initListeners() {
   // before pointer events start going to the cross-origin child frame. This is
   // a reliable hand-off point for embedded players.
   document.addEventListener('mouseover', event => {
+    if (isQualityPanelTarget(event.target)) { clearHide(); return; }
     const media = safeClosest(event.target, MEDIA_ELEMENT_SELECTOR);
     if (isMediaElement(media)) {
       rememberPointer(event);
@@ -1247,6 +1224,7 @@ function initListeners() {
   }, true);
 
   document.addEventListener('focusin', event => {
+    if (isQualityPanelTarget(event.target)) { clearHide(); return; }
     const media = safeClosest(event.target, MEDIA_ELEMENT_SELECTOR);
     if (isMediaElement(media)) activateDirectMedia(media, event.target);
   }, true);
@@ -1264,15 +1242,20 @@ function initListeners() {
     if (event.target instanceof HTMLVideoElement) activateDirectMedia(event.target, event.target);
   }, true);
 
-  document.addEventListener('pointerleave', () => scheduleHide(150), true);
+  document.addEventListener('pointerleave', event => {
+    // Capture receives non-bubbling leaves from every descendant, including
+    // video -> toolbar and icon -> button transitions. Only leaving the
+    // document should schedule a document-level hide.
+    if (event.target === document.documentElement && !event.relatedTarget) {
+      if (_pointerFeedAnchor) { _feedPointerInside = false; scheduleFeedHide(); }
+      else scheduleHide(150);
+    }
+  }, true);
 
   const handleMediaIdentityChange = event => {
     if (!(event.target instanceof HTMLVideoElement)) return;
 
-    if (event.target === _activeMedia) {
-      _qualityPanel?.invalidateContext?.();
-      _activeMediaKey = '';
-    }
+    if (event.target === _activeMedia) activateMediaPlayer(_activeMedia, _activeContextNode);
 
     queuePointerProcessing(true);
     queueMediaScan();
@@ -1296,7 +1279,7 @@ function initListeners() {
 
     for (const mutation of mutations) {
       if (mutation.type === 'childList') {
-        if (_activeMedia && !_activeMedia.isConnected) hideButton(true);
+        if (_activeMedia && !_activeMedia.isConnected) shouldScan = true;
         for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
           if (!(node instanceof Element)) continue;
           if (isMediaElement(node) || safeQueryAll(node, MEDIA_ELEMENT_SELECTOR).length) {
@@ -1308,7 +1291,11 @@ function initListeners() {
         const target = mutation.target;
         if (!(target instanceof Element)) continue;
         if (isMediaElement(target)
+            || (mutation.attributeName === 'href' && _activeMedia
+              && safeClosest(_activeMedia, PLAYER_PLACEHOLDER_SELECTOR)?.contains(target))
             || target === _activeMedia
+            || target === _activeAnchor
+            || (_activeAnchor && target.contains(_activeAnchor))
             || target.contains?.(_activeMedia)
             || safeQueryAll(target, MEDIA_ELEMENT_SELECTOR).length) {
           shouldScan = true;
@@ -1329,12 +1316,8 @@ function initListeners() {
   });
 
   const reposition = () => {
-    if (_activeMedia && isRenderedMedia(_activeMedia)) {
-      positionBtn(_activeMedia);
-    } else {
-      hideButton(true);
-      queueMediaScan();
-    }
+    // Use the same reconciliation path during resize/fullscreen, too.
+    queueMediaScan();
   };
 
   window.addEventListener('scroll', event => {
@@ -1361,7 +1344,31 @@ function initListeners() {
     }
   }, { passive: true });
 
-  // Initial pass catches players already present when the content script loads.
+  document.addEventListener('fullscreenchange', reposition);
+
+  // SPA navigation and reused media nodes need no site-specific events.
+  let pageUrl = location.href;
+  const refresh = () => {
+    if (_contextInvalidated || document.hidden) return;
+    if (pageUrl !== location.href) {
+      pageUrl = location.href;
+      _pointerFeedAnchor = null;
+      _feedPointerInside = false;
+      clearFeedHide();
+      _dismissedMediaKey = '';
+      hideButton(true);
+      PD.QualityAnalyzer?.clearCache();
+    }
+    queueMediaScan();
+  };
+  const scanTimer = setInterval(refresh, 1000);
+  window.addEventListener('popstate', refresh);
+  window.addEventListener('hashchange', refresh);
+  window.addEventListener('pageshow', refresh);
+  document.addEventListener('visibilitychange', refresh);
+  window.addEventListener('pagehide', event => {
+    if (!event.persisted) { clearFeedHide(); clearInterval(scanTimer); observer.disconnect(); _qualityPanel?.destroy(); }
+  });
   queueMediaScan();
 }
 

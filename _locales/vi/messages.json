@@ -1,4 +1,259 @@
 {
+  "qaCapturedSources": { "message": "Nguồn media đã bắt được" },
+  "qaOtherTabSource": { "message": "Nguồn khác trong tab — kiểm tra trước khi tải" },
+  "qaPlayerSource": { "message": "Nguồn bắt được trong trình phát / khung này" },
+  "qaAnalyzeSource": { "message": "Phân tích chất lượng" },
+  "qaDownloadSource": { "message": "Gửi nguồn đến PDownloader" },
+  "qaRefreshSources": { "message": "Làm mới nguồn" },
+  "qaSourceExpired": { "message": "Nguồn này không còn khả dụng. Hãy làm mới danh sách." },
+  "qaBlobHint": { "message": "Tệp cục bộ: lưu bằng trình duyệt. Blob dạng luồng cần nguồn HLS/DASH hoặc HTTP đã bắt được." },
+  "qaSaveBlob": { "message": "Lưu video cục bộ bằng trình duyệt" },
+  "qaBlobRequested": { "message": "Đã yêu cầu trình duyệt lưu video." },
+  "qaBlobChanged": { "message": "Video đã thay đổi. Hãy mở lại bảng tải." },
+  "qaBlobUnavailable": { "message": "Blob này không đọc được thành tệp video (có thể là luồng phát). Hãy phát video rồi làm mới nguồn đã bắt được." },
+  "popupCompanion": {
+    "message": "Tiện ích trình duyệt"
+  },
+  "popupExpand": {
+    "message": "Mở giao diện mở rộng"
+  },
+  "popupRetry": {
+    "message": "Kiểm tra lại kết nối"
+  },
+  "popupConnectionHelp": {
+    "message": "Mở PDownloader trên máy tính rồi thử lại. Bạn vẫn có thể xem và sao chép liên kết đã phát hiện."
+  },
+  "popupNavigation": {
+    "message": "Điều hướng chính"
+  },
+  "popupFiles": {
+    "message": "Tệp"
+  },
+  "popupSettings": {
+    "message": "Cài đặt"
+  },
+  "popupRescan": {
+    "message": "Quét lại trang này"
+  },
+  "popupSearch": {
+    "message": "Tìm tên tệp hoặc liên kết…"
+  },
+  "popupFilterType": {
+    "message": "Lọc theo loại tệp"
+  },
+  "popupAll": {
+    "message": "Tất cả"
+  },
+  "popupDocuments": {
+    "message": "Tài liệu"
+  },
+  "popupSort": {
+    "message": "Sắp xếp tệp"
+  },
+  "popupSortDetected": {
+    "message": "Phát hiện"
+  },
+  "popupSortName": {
+    "message": "Tên A–Z"
+  },
+  "popupSortSize": {
+    "message": "Lớn nhất"
+  },
+  "popupSelectVisible": {
+    "message": "Chọn mục đang hiện"
+  },
+  "popupSendSelected": {
+    "message": "Gửi mục đã chọn"
+  },
+  "popupBatchHelp": {
+    "message": "Giữ giao diện mở đến khi gửi xong. Tệp được tải tiếp trong ứng dụng máy tính."
+  },
+  "popupCaptureRules": {
+    "message": "Quy tắc bắt tệp"
+  },
+  "popupMinSize": {
+    "message": "Bắt thêm tệp có dung lượng từ"
+  },
+  "popupMinSizeHelp": {
+    "message": "Bắt thêm tệp theo dung lượng. Đặt 0 để tắt quy tắc này. Đuôi tệp trong danh sách và MIME hỗ trợ vẫn được bắt không giới hạn dung lượng."
+  },
+  "popupExtensions": {
+    "message": "Đuôi tệp"
+  },
+  "popupExtensionsHelp": {
+    "message": "Ngăn cách bằng dấu phẩy hoặc khoảng trắng. Hỗ trợ ký tự đại diện như mp*."
+  },
+  "popupRestoreRules": {
+    "message": "Dùng mặc định"
+  },
+  "popupSaveRules": {
+    "message": "Lưu quy tắc"
+  },
+  "popupDomainPlaceholder": {
+    "message": "Tên miền, ví dụ example.com"
+  },
+  "popupAdd": {
+    "message": "Thêm"
+  },
+  "popupAppearance": {
+    "message": "Giao diện"
+  },
+  "popupThemeSystem": {
+    "message": "Hệ thống"
+  },
+  "popupThemeLight": {
+    "message": "Sáng"
+  },
+  "popupThemeDark": {
+    "message": "Tối"
+  },
+  "popupRequestTimeout": {
+    "message": "Chưa nhận được xác nhận. Kiểm tra PDownloader trước khi gửi lại để tránh tải trùng."
+  },
+  "popupBackgroundError": {
+    "message": "Tiện ích không phản hồi. Mở lại giao diện hoặc tải lại tiện ích."
+  },
+  "popupConnected": {
+    "message": "Đã kết nối PDownloader"
+  },
+  "popupDisconnected": {
+    "message": "Chưa kết nối PDownloader"
+  },
+  "popupSelectionCount": {
+    "message": "Đã chọn $FIRST$",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupResultCount": {
+    "message": "$FIRST$ / $SECOND$ tệp",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      },
+      "second": {
+        "content": "$2"
+      }
+    }
+  },
+  "popupScanning": {
+    "message": "Đang tìm tệp…"
+  },
+  "popupScanFailed": {
+    "message": "Không thể làm mới danh sách"
+  },
+  "popupUnsupportedPage": {
+    "message": "Trang không hỗ trợ"
+  },
+  "popupNoMatches": {
+    "message": "Không có tệp phù hợp"
+  },
+  "popupNoFiles": {
+    "message": "Chưa phát hiện tệp"
+  },
+  "popupNoMatchesHelp": {
+    "message": "Thử từ khóa hoặc loại tệp khác."
+  },
+  "popupEmptyHelp": {
+    "message": "Phát video, âm thanh hoặc mở PDF rồi quét lại. Không thể quét trang nội bộ của trình duyệt."
+  },
+  "popupSelectFile": {
+    "message": "Chọn $FIRST$",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupUnknownSize": {
+    "message": "Chưa rõ dung lượng"
+  },
+  "popupSent": {
+    "message": "Đã gửi đến PDownloader"
+  },
+  "popupSending": {
+    "message": "Đang gửi…"
+  },
+  "popupCopyLink": {
+    "message": "Sao chép liên kết: $FIRST$",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupSendFile": {
+    "message": "Gửi đến PDownloader: $FIRST$",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupCopied": {
+    "message": "Đã sao chép liên kết"
+  },
+  "popupCopyFailed": {
+    "message": "Không thể sao chép liên kết. Kiểm tra quyền truy cập bộ nhớ tạm."
+  },
+  "popupBatchResult": {
+    "message": "Đã gửi $FIRST$ / $SECOND$ tệp. Tệp chưa gửi vẫn được chọn.",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      },
+      "second": {
+        "content": "$2"
+      }
+    }
+  },
+  "popupSourceClosed": {
+    "message": "Tab nguồn không còn khả dụng."
+  },
+  "popupRescanHelp": {
+    "message": "Không thể quét lại trang. Tải lại tab nguồn, phát nội dung rồi thử lại; các tệp bắt được từ mạng vẫn khả dụng."
+  },
+  "popupInheritedBlock": {
+    "message": "Bị chặn bởi $FIRST$. Xóa quy tắc đó bên dưới để bật bắt link.",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupRemoveDomain": {
+    "message": "Bỏ chặn tên miền: $FIRST$",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
+  "popupSaveFailed": {
+    "message": "Không thể lưu cài đặt. Vui lòng thử lại."
+  },
+  "popupSaved": {
+    "message": "Đã lưu cài đặt"
+  },
+  "popupInvalidRules": {
+    "message": "Nhập dung lượng không âm và đuôi tệp hợp lệ (chữ, số hoặc *)."
+  },
+  "popupDefaultsDraft": {
+    "message": "Đã điền mặc định. Nhấn Lưu quy tắc để áp dụng."
+  },
+  "popupInvalidDomain": {
+    "message": "Nhập tên miền hợp lệ, không chứa ký tự đại diện, thông tin đăng nhập hoặc cổng."
+  },
+  "popupRecentCaught": {
+    "message": "$FIRST$ link bắt từ lần mở trước",
+    "placeholders": {
+      "first": {
+        "content": "$1"
+      }
+    }
+  },
   "extName": {
     "message": "PDownloader"
   },
@@ -207,5 +462,62 @@
   },
   "contentAddingPdf": {
     "message": "Đang thêm PDF…"
+  },
+  "qaToolbar": {
+    "message": "Điều khiển video"
+  },
+  "qaHideToolbar": {
+    "message": "Ẩn thanh công cụ của video này"
+  },
+  "qaChooseFile": {
+    "message": "Chọn tệp để tải"
+  },
+  "qaMore": {
+    "message": "Tùy chọn khác"
+  },
+  "qaReanalyze": {
+    "message": "Phân tích lại định dạng"
+  },
+  "qaAnalyzing": {
+    "message": "Đang phân tích định dạng…"
+  },
+  "qaRetry": {
+    "message": "Thử lại"
+  },
+  "qaDirectDownload": {
+    "message": "Gửi nguồn media hiện tại"
+  },
+  "qaFilterFormats": {
+    "message": "Lọc định dạng"
+  },
+  "qaMergeHint": {
+    "message": "PDownloader sẽ ghép âm thanh cho định dạng video riêng. Dung lượng chưa gồm âm thanh ghép."
+  },
+  "qaSendHint": {
+    "message": "Chọn định dạng để gửi đến PDownloader."
+  },
+  "pipToggle": {
+    "message": "Bật / tắt hình trong hình"
+  },
+  "pipFrameUnavailable": {
+    "message": "Không thể bật PiP từ khung khác nguồn này. Hãy mở trực tiếp trang của trình phát."
+  },
+  "pipNoVideo": {
+    "message": "Chưa có video để bật hình trong hình."
+  },
+  "pipUnsupported": {
+    "message": "Trình duyệt không hỗ trợ API PiP này. Hãy dùng nút hình trong hình có sẵn của trình duyệt."
+  },
+  "pipPolicyBlocked": {
+    "message": "PiP bị chặn bởi quyền của trình duyệt hoặc khung nhúng."
+  },
+  "pipNotReady": {
+    "message": "Đợi video tải thông tin rồi bấm PiP lại. Có thể cần phát video trước."
+  },
+  "pipClickRequired": {
+    "message": "Hãy bấm trực tiếp nút PiP để cấp tương tác người dùng."
+  },
+  "pipFailed": {
+    "message": "Không thể bật hình trong hình cho video này."
   }
 }
