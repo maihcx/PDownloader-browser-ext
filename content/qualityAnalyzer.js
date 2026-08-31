@@ -255,6 +255,8 @@
             pageUrl: data.pageUrl, mediaUrl: context.url, fallback: 'video'
           }) || context.title || data.title || 'video';
           try {
+            if (control.current && !await control.current(revision)) return;
+            if (revision !== control.revision()) return;
             const response = await PDWebExt.runtime.sendMessage({
               action: 'download_media_format', url: data.analysisUrl || context.url, formatId: String(format.id) + (merged ? '+bestaudio' : ''),
               filename: sanitizeName(title) + '_' + quality + '.' + (format.ext || 'mp4'),
@@ -267,8 +269,11 @@
           } catch (error) {
             if (revision === control.revision()) showToast(panel, error?.message || PD.I18n.t('ytDownloadError'), true);
           } finally {
-            sending = false; search.disabled = false;
-            dropdown.querySelectorAll('.pd-quality-item, .pd-quality-filter-btn').forEach(button => { button.disabled = false; });
+            sending = false;
+            if (revision === control.revision()) {
+              search.disabled = false;
+              dropdown.querySelectorAll('.pd-quality-item, .pd-quality-filter-btn').forEach(button => { button.disabled = false; });
+            }
           }
         });
         list.append(item);
@@ -468,7 +473,11 @@
     async function requireCurrentSelection(expected, revision) {
       const current = await contextProvider();
       if (revision !== contextRevision || destroyed) return null;
-      const fields = ['url', 'pageUrl', 'frameUrl', 'mediaUrl', 'blobUrl', 'mediaKey'];
+      // A DOM-identified item can load/replace its buffer during analysis.
+      // Its validated permalink remains the identity, not that temporary src.
+      const fields = expected?.preferItemAnalysis && current?.preferItemAnalysis
+        ? ['url', 'pageUrl', 'frameUrl']
+        : ['url', 'pageUrl', 'frameUrl', 'mediaUrl', 'blobUrl', 'mediaKey'];
       if (!current || fields.some(key => String(current[key] || '') !== String(expected?.[key] || ''))) {
         throw new Error(PD.I18n.t('qaSourceExpired'));
       }
@@ -604,6 +613,7 @@
           } catch (_) { /* Page analysis remains available when capture is offline. */ }
           if (revision !== contextRevision || destroyed) return;
         }
+        if (!await requireCurrentSelection(ownerContext, revision)) return;
         if (selectedSource) {
           // Refresh registry metadata before analysis; stale rows cannot turn
           // into requests for an unrelated or expired source.
@@ -612,7 +622,7 @@
           context = { ...context, url: source.url, mediaUrl: source.url,
             referer: source.referer || context.referer, headers: source.requestHeaders,
             cacheKey: [context.cacheKey, source.id, source.url].join('|'), allowDirectFallback: false };
-        } else if (!analyzePage && (context.frameUrl || context.blobUrl)
+        } else if (!analyzePage && !context.preferItemAnalysis && (context.frameUrl || context.blobUrl)
             && sources.some(source => source.scope !== 'tab')) {
           // MSE/blob players also stream ordinary MP4/WebM over fetch/XHR.
           // Those captured URLs are usable without a page extractor, just as
@@ -621,8 +631,12 @@
         }
         const response = await analyze(context, force);
         if (revision !== contextRevision || destroyed) return;
+        if (!await requireCurrentSelection(ownerContext, revision)) return;
         if (!response?.success || !response.formats?.length) throw new Error(response?.error || PD.I18n.t('ytCannotAnalyze'));
-        renderDropdown(dropdown, response, context, panel, { header, revision: () => contextRevision, close: () => closeDropdown(true), position });
+        renderDropdown(dropdown, response, context, panel, {
+          header, revision: () => contextRevision, close: () => closeDropdown(true), position,
+          current: currentRevision => requireCurrentSelection(ownerContext, currentRevision)
+        });
         if (document.activeElement === mainButton) dropdown.querySelector('input')?.focus({ preventScroll: true });
       } catch (error) {
         if (revision === contextRevision && !destroyed) failure(context, error?.message, sources, ownerContext);

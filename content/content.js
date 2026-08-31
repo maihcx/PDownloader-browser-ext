@@ -1,7 +1,8 @@
 const VIDEO_CONTEXT_SELECTOR = [
   '[data-video-id]',
   '[aria-label="Video player"]',
-  '[data-testid*="video"]',
+  '[data-testid*="video" i]',
+  '[data-e2e*="video" i]',
   'article',
   '[role="article"]'
 ].join(',');
@@ -12,12 +13,14 @@ const MEDIA_ELEMENT_SELECTOR = 'video,iframe,' + PLAYER_PLACEHOLDER_SELECTOR;
 const MEDIA_CONTEXT_SELECTOR = [
   '[data-video-id]',
   '[aria-label="Video player"]',
-  '[data-testid*="video"]',
-  '[data-testid*="player"]',
-  '[class*="video"]',
-  '[class*="player"]',
-  '[id*="video"]',
-  '[id*="player"]',
+  '[data-testid*="video" i]',
+  '[data-testid*="player" i]',
+  '[data-e2e*="video" i]',
+  '[data-e2e*="player" i]',
+  '[class*="video" i]',
+  '[class*="player" i]',
+  '[id*="video" i]',
+  '[id*="player" i]',
   'article',
   '[role="article"]',
   'dialog',
@@ -25,17 +28,19 @@ const MEDIA_CONTEXT_SELECTOR = [
   '[aria-modal="true"]'
 ].join(',');
 const MEDIA_MUTATION_ATTRIBUTES = [
-  'src', 'data-src', 'poster', 'href', 'data-video-id', 'data-media-id',
+  'src', 'data-src', 'poster', 'href', 'id', 'data-video-id', 'data-media-id', 'data-item-id', 'data-aweme-id',
   'class', 'open', 'hidden', 'aria-hidden', 'srcset', 'sizes', 'media', 'alt'
 ];
 const MEDIA_SURFACE_SELECTOR = [
   '[aria-label="Video player"]',
-  '[data-testid*="player"]',
-  '[data-testid*="video"]',
-  '[class*="player"]',
-  '[class*="video"]',
-  '[id*="player"]',
-  '[id*="video"]'
+  '[data-testid*="player" i]',
+  '[data-testid*="video" i]',
+  '[data-e2e*="player" i]',
+  '[data-e2e*="video" i]',
+  '[class*="player" i]',
+  '[class*="video" i]',
+  '[id*="player" i]',
+  '[id*="video" i]'
 ].join(',');
 
 
@@ -205,10 +210,14 @@ function isLikelyMediaFrame(frame) {
     && (_reportedMediaFrames.has(frame) || getFrameSemanticScore(frame) >= 24);
 }
 
-function isMediaElement(element) {
-  return element instanceof HTMLVideoElement || PD.ImageMedia?.isEligible(element) || isLikelyMediaFrame(element)
+function isVideoElement(element) {
+  return element instanceof HTMLVideoElement || isLikelyMediaFrame(element)
     || (element instanceof Element && safeMatches(element, PLAYER_PLACEHOLDER_SELECTOR)
       && !element.querySelector('video,iframe'));
+}
+
+function isMediaElement(element) {
+  return isVideoElement(element) || !!PD.ImageMedia?.isEligible(element);
 }
 
 function getMediaSourceUrl(media) {
@@ -331,6 +340,7 @@ function isTopmostAtCenter(media) {
   const painted = document.elementFromPoint?.(x, y);
   if (!(painted instanceof Element)) return false;
   if (painted === surface || surface.contains?.(painted)) return true;
+  if (painted instanceof HTMLImageElement && PD.ImageMedia?.getVideoOwner(painted) === media) return true;
 
   const mediaContext = safeClosest(surface, MEDIA_CONTEXT_SELECTOR)
     || safeClosest(media, MEDIA_CONTEXT_SELECTOR);
@@ -570,12 +580,13 @@ function scheduleImageHide() {
   }, 240);
 }
 
-function imageAtPoint(target, x, y) {
+function imageAtPoint(target, x, y, includePosters = false) {
   if (isQualityPanelTarget(target)) return null;
   for (const element of new Set([target, ...(document.elementsFromPoint?.(x, y) || [])])) {
     // Do not select a photo painted behind an unrelated dialog or video.
     if (element !== target && !(target instanceof Element && target.contains(element))) continue;
-    if (PD.ImageMedia?.isEligible(element) && isElementVisuallyRendered(element, 120, 120)
+    if (element instanceof HTMLImageElement && (includePosters || PD.ImageMedia?.isEligible(element))
+        && isElementVisuallyRendered(element, 120, 120)
         && containsPoint(element.getBoundingClientRect(), x, y)) return element;
   }
   return null;
@@ -586,6 +597,16 @@ function selectPointedImage(target, x, y) {
   if (isQualityPanelTarget(target) || _qualityPanel?.isGestureActive?.()) {
     if (wasImage) clearImageHide();
     return wasImage;
+  }
+  const poster = imageAtPoint(target, x, y, true);
+  const owner = PD.ImageMedia?.getVideoOwner(poster);
+  if (owner) {
+    // Release an image picker before the general interaction lock runs. This
+    // also handles a lazy player appearing behind its already-selected cover.
+    if (wasImage) hideButton(true);
+    // Continue through normal video/card selection so the existing feed
+    // hover rules can close an old card before activating the new player.
+    return false;
   }
   const image = imageAtPoint(target, x, y);
   if (image) {
@@ -807,12 +828,14 @@ function containsPoint(rect, x, y, margin = 1) {
 
 function addMediaFromRoot(root, candidates) {
   if (!root) return;
-  if (isMediaElement(root)) {
+  // Keep video discovery separate from the image hover path. In particular,
+  // finding a cover image must not terminate the climb to its video owner.
+  if (isVideoElement(root)) {
     candidates.add(root);
   }
 
   for (const media of safeQueryAll(root, MEDIA_ELEMENT_SELECTOR)) {
-    if (isMediaElement(media)) candidates.add(media);
+    if (isVideoElement(media)) candidates.add(media);
   }
 }
 
@@ -909,14 +932,15 @@ function findMediaAtPoint(x, y, target) {
   const candidates = new Set();
   const targetElement = target instanceof Element ? target : null;
 
-  const directMedia = safeClosest(targetElement, MEDIA_ELEMENT_SELECTOR);
-  if (isMediaElement(directMedia)) candidates.add(directMedia);
+  const directMedia = PD.ImageMedia?.getVideoOwner(targetElement)
+    || safeClosest(targetElement, MEDIA_ELEMENT_SELECTOR);
+  if (isVideoElement(directMedia)) candidates.add(directMedia);
 
   const stack = document.elementsFromPoint?.(x, y) || (targetElement ? [targetElement] : []);
   for (const element of stack) {
     if (!(element instanceof Element)) continue;
 
-    if (isMediaElement(element)) candidates.add(element);
+    if (isVideoElement(element)) candidates.add(element);
 
     const context = safeClosest(element, MEDIA_CONTEXT_SELECTOR)
       || safeClosest(element, VIDEO_CONTEXT_SELECTOR);
@@ -1182,6 +1206,12 @@ function queueMediaScan() {
     // Images are hover-selected only. Automatic video discovery must not
     // reopen them or replace their picker with an unrelated playing video.
     if (_activeMedia instanceof HTMLImageElement) {
+      const owner = PD.ImageMedia?.getVideoOwner(_activeMedia);
+      if (owner) {
+        hideButton(true);
+        activateDirectMedia(owner, owner);
+        return;
+      }
       if (!isRenderedMedia(_activeMedia)) { hideButton(true); return; }
       activateMediaPlayer(_activeMedia, _activeMedia);
       const pointer = _lastPointerEvent;

@@ -1,5 +1,5 @@
-// Site-independent media context. Page/embed analysis is delegated to the
-// existing desktop analyzer; no hostname checks or provider video IDs here.
+// Shared media selection context. DOM permalink fallbacks only identify the
+// selected item; extraction, format analysis and downloads use the same pipeline.
 (function (root) {
   const PD = root.PD || (root.PD = {});
   function httpUrl(value) {
@@ -43,8 +43,78 @@
       return subset(a, b) || subset(b, a);
     } catch { return false; }
   }
+  function getTikTokIdentityPermalink(media) {
+    const card = media.closest('[data-e2e="feed-video"],[data-e2e="recommend-list-item-container"],article,[role="article"]');
+    if (!card || card.querySelectorAll('video,iframe').length !== 1) return null;
+    // media-card-0 is a recyclable list position, not a video ID. The original
+    // resolver read xgwrapper/data-item IDs; only trust this player's ancestry.
+    const ids = new Set();
+    for (let node = media; node && card.contains(node); node = node.parentElement) {
+      const wrapperId = node.id?.match(/^xgwrapper-(?:\d+-)?(\d{15,22})(?:-|$)/i)?.[1];
+      if (wrapperId) ids.add(wrapperId);
+      for (const name of ['data-item-id', 'data-video-id', 'data-aweme-id']) {
+        const value = node.getAttribute(name)?.trim();
+        if (/^\d{15,22}$/.test(value || '')) ids.add(value);
+      }
+      if (node === card) break;
+    }
+    if (ids.size !== 1) return null;
+    const id = [...ids][0], profiles = new Map(), permalinks = new Map();
+    for (const link of card.querySelectorAll('a[href]')) {
+      try {
+        const url = new URL(linkUrl(link));
+        if (url.hostname !== 'tiktok.com' && !url.hostname.endsWith('.tiktok.com')) continue;
+        const match = url.pathname.match(/^\/@([^/]+)(?:\/video\/(\d{15,22}))?\/?$/);
+        if (!match) continue;
+        const username = decodeURIComponent(match[1]);
+        if (!/^[A-Za-z0-9._]{1,64}$/.test(username)) continue;
+        if (match[2] === id) permalinks.set(username.toLowerCase(), username);
+        else if (!match[2] && !link.closest('[data-e2e="video-desc"],[data-media-card-description-container]')) {
+          profiles.set(username.toLowerCase(), username);
+        }
+      } catch { /* Ignore malformed links, never substitute another card. */ }
+    }
+    const authors = permalinks.size ? permalinks : profiles;
+    if (authors.size !== 1) return null;
+    const username = [...authors.values()][0];
+    const title = (card.querySelector('[data-e2e="video-desc"]')?.textContent || '').trim().slice(0, 300);
+    return { url: 'https://www.tiktok.com/@' + encodeURIComponent(username) + '/video/' + id,
+      title, source: 'dom-id' };
+  }
+  function getIdentityPermalink(media) {
+    // Restore the original DOM-ID fallback for feed players that expose no
+    // usable href/src. The site's ID is an identifier, not a CDN file name.
+    // Scope this URL convention to its actual host, never to arbitrary pages
+    // that happen to use an attribute called data-video-id.
+    const host = location.hostname.toLowerCase();
+    if (host === 'tiktok.com' || host.endsWith('.tiktok.com')) return getTikTokIdentityPermalink(media);
+    if (host !== 'facebook.com' && !host.endsWith('.facebook.com')
+        && host !== 'fb.watch' && host !== 'www.fb.watch') return null;
+    const owner = media.closest('[data-video-id]');
+    const id = owner?.getAttribute('data-video-id')?.trim() || '';
+    if (!/^[1-9]\d{4,29}$/.test(id)) return null;
+    return { url: 'https://www.facebook.com/watch/?v=' + encodeURIComponent(id),
+      title: '', source: 'dom-id' };
+  }
+  function getItemAnalysisUrl(itemUrl) {
+    if (!itemUrl) return '';
+    try {
+      const url = new URL(itemUrl);
+      if (!/^https?:$/.test(url.protocol)
+          || (url.hostname !== 'instagram.com' && !url.hostname.endsWith('.instagram.com'))) return '';
+      const item = url.pathname.match(/^\/(reels|reel|p|tv)\/([A-Za-z0-9_-]+)\/?$/i);
+      if (!item) return '';
+      // Restore the original resolver's /reels/ -> /reel/ alias for analysis.
+      // Keep getItemLink/linkUrl unchanged: hover ownership must still match
+      // the actual href in the DOM. Never derive an item from captured CDN URLs.
+      if (item[1].toLowerCase() === 'reels') url.pathname = '/reel/' + item[2] + '/';
+      return url.href;
+    } catch { return ''; }
+  }
   function getItemLink(media) {
     if (!media?.isConnected || media.localName === 'iframe' || media.localName === 'img') return null;
+    const identifiedItem = getIdentityPermalink(media);
+    if (identifiedItem) return identifiedItem;
     const wrapper = media.closest('a[href]');
     const wrappingUrl = linkUrl(wrapper);
     let parent = media.parentElement;
@@ -78,15 +148,24 @@
     const article = media.closest('article, [role="article"]');
     const bookmarks = article?.querySelectorAll('a[rel~="bookmark"][href]') || [];
     const linkedUrl = item?.url || (bookmarks.length === 1 ? linkUrl(bookmarks[0]) : '');
+    const itemAnalysisUrl = getItemAnalysisUrl(linkedUrl);
+    // A directly opened Instagram Reel may expose only blob: video nodes and
+    // no self-link in the rendered player. In that case the current page is
+    // the selected item, so normalize it through the same shared URL path.
+    const pageItemAnalysisUrl = !linkedUrl ? getItemAnalysisUrl(pageUrl) : '';
     const multipleVideos = document.querySelectorAll('video').length > 1;
     const isPreview = !!media.closest('[class*="preview" i],[id*="preview" i]');
     // A feed preview without an item link must not silently analyze the feed
     // homepage. Wait for its item URL, or use its own HTTP media source.
-    const url = frameUrl || linkedUrl || (isPreview ? mediaUrl : (multipleVideos && mediaUrl ? mediaUrl : pageUrl)) || mediaUrl;
+    const url = frameUrl || itemAnalysisUrl || pageItemAnalysisUrl || linkedUrl
+      || (isPreview ? mediaUrl : (multipleVideos && mediaUrl ? mediaUrl : pageUrl)) || mediaUrl;
     if (!url) return null;
     const title = info.frameTitle || item?.title || getMediaTitle(media, contextNode);
     return {
       url, pageUrl, mediaUrl, frameUrl, title, referer: pageUrl,
+      // A validated selected-item permalink takes priority over unrelated
+      // requests captured in the same frame. Keep capture as a fallback.
+      preferItemAnalysis: !frameUrl && (item?.source === 'dom-id' || !!itemAnalysisUrl || !!pageItemAnalysisUrl),
       blobUrl: media.localName === 'video' && /^blob:/.test(media.currentSrc || media.src || '') ? (media.currentSrc || media.src) : '',
       mediaKey: info.mediaKey || '',
       cacheKey: [url, info.mediaKey || '', mediaUrl, title].join('|'),
