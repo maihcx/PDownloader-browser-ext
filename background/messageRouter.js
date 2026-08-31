@@ -88,7 +88,9 @@
     if (fromUrl) return fromUrl;
 
     const base = sanitizeMediaName(candidate?.title || fallbackTitle || 'media');
-    return candidate?.mediaType === 'audio' ? `${base}.mp3` : `${base}.mp4`;
+    const extension = /^[a-z0-9]{2,8}$/i.test(candidate?.extension || '')
+      ? candidate.extension : candidate?.mediaType === 'audio' ? 'mp3' : 'mp4';
+    return `${base}.${extension}`;
   }
 
   async function markSuccessfulCapture(candidate, label) {

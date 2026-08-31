@@ -1,4 +1,19 @@
 {
+  "qaExactPlayerSource": { "message": "Matches the selected video's source" },
+  "qaFrameSource": { "message": "Same page/frame — may belong to another video" },
+  "qaCapturedDownloadHint": { "message": "Captured files can be downloaded without page analysis. Verify the source: a page/frame can contain multiple videos." },
+  "qaAnalyzePage": { "message": "Analyze page" },
+  "qaChooseImage": { "message": "Choose an image to download" },
+  "qaImage": { "message": "Image" },
+  "qaImageSearch": { "message": "Find image source, format, size…" },
+  "qaImageCurrent": { "message": "Displayed image" },
+  "qaImageVariant": { "message": "Alternative source" },
+  "qaImageLinked": { "message": "Linked image" },
+  "qaImageLoading": { "message": "Reading image sources…" },
+  "qaImageEmpty": { "message": "No matching image source." },
+  "qaImageChanged": { "message": "The selected image has changed. Reopen the picker." },
+  "qaImageUnavailable": { "message": "This image source is unavailable. Reload the image and try again." },
+  "qaImageHint": { "message": "Choose a source to send to PDownloader. w/x values are declared by the page; blob images are saved by the browser." },
   "qaCapturedSources": { "message": "Captured media sources" },
   "qaOtherTabSource": { "message": "Other source in this tab — verify before downloading" },
   "qaPlayerSource": { "message": "Source captured in this player/frame" },
@@ -464,10 +479,10 @@
     "message": "Adding PDF…"
   },
   "qaToolbar": {
-    "message": "Video controls"
+    "message": "Media controls"
   },
   "qaHideToolbar": {
-    "message": "Hide controls for this video"
+    "message": "Hide controls for this item"
   },
   "qaChooseFile": {
     "message": "Choose a file to download"

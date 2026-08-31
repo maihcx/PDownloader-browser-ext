@@ -58,6 +58,7 @@
     pip: 'M3 4h18v15H3zM12 11h7v6h-7z',
     more: 'M12 4v1m0 6v1m0 6v1',
     video: 'M3 5h18v14H3zM10 9l5 3-5 3z',
+    image: 'M3 3h18v18H3zM3 16l6-6 5 5 3-3 4 4M16 7h.01',
     audio: 'M9 17V5l11-2v12M9 17a3 3 0 1 1-3-3h3M20 15a3 3 0 1 1-3-3h3'
   };
   function icon(name) {
@@ -114,11 +115,17 @@
       const urls = [...new Set([url, context?.mediaUrl].filter(value => /^https?:\/\//i.test(value || '')))];
       let result;
       for (const analysisUrl of urls) {
-        result = await PDWebExt.runtime.sendMessage({
-          action: 'analyze_media', url: analysisUrl,
-          referer: context?.referer || location.href,
-          headers: context?.headers || undefined
-        });
+        try {
+          result = await PDWebExt.runtime.sendMessage({
+            action: 'analyze_media', url: analysisUrl,
+            referer: context?.referer || location.href,
+            headers: context?.headers || undefined
+          });
+        } catch (error) {
+          // A failed page extractor must not prevent trying this element's
+          // own HTTP source. Never substitute another player's candidate.
+          result = { success: false, error: error?.message || PD.I18n.t('ytCannotAnalyze') };
+        }
         if (result?.success && result.formats?.length) return { ...result, analysisUrl };
       }
       return result;
@@ -271,6 +278,72 @@
     draw();
   }
 
+  function renderImageDropdown(dropdown, context, panel, control) {
+    control.header();
+    const revision = control.revision();
+    let query = '', sending = false;
+    const title = node('div', 'pd-quality-subtitle', context.title);
+    title.title = context.title; dropdown.append(title);
+    const search = node('input', 'pd-quality-search');
+    search.type = 'search'; search.placeholder = PD.I18n.t('qaImageSearch');
+    search.setAttribute('aria-label', search.placeholder);
+    const list = node('div', 'pd-quality-list');
+    const footer = node('div', 'pd-quality-footer', PD.I18n.t('qaImageHint'));
+    dropdown.append(search, list, footer);
+    search.addEventListener('input', () => { query = search.value.toLowerCase(); draw(); });
+    function draw() {
+      list.replaceChildren();
+      for (const source of context.sources || []) {
+        const label = PD.I18n.t(source.current ? 'qaImageCurrent' : source.linked ? 'qaImageLinked' : 'qaImageVariant');
+        const dimension = source.width && source.height ? source.width + ' × ' + source.height : source.descriptor;
+        const format = source.extension ? source.extension.toUpperCase() : PD.I18n.t('qaImage');
+        const detail = [format, dimension, source.filename].filter(Boolean).join(' · ');
+        if (!(label + ' ' + detail).toLowerCase().includes(query)) continue;
+        const item = node('button', 'pd-quality-item'); item.type = 'button';
+        item.setAttribute('aria-label', label + ' · ' + detail);
+        const mark = node('span', 'pd-quality-format-icon'); mark.append(icon('image'));
+        const description = node('span', 'pd-quality-description');
+        description.append(node('strong', '', label), node('small', '', detail));
+        item.append(mark, description, icon('download'));
+        item.addEventListener('click', async () => {
+          if (sending || revision !== control.revision()) return;
+          sending = true; search.disabled = true;
+          list.querySelectorAll('button').forEach(button => { button.disabled = true; });
+          try {
+            const current = await control.context();
+            if (revision !== control.revision()) return;
+            if (current?.mediaType !== 'image' || current.cacheKey !== context.cacheKey
+                || !current.sources.some(item => item.url === source.url)) throw new Error(PD.I18n.t('qaImageChanged'));
+            const local = source.url.startsWith('blob:');
+            if (local) {
+              await PD.BlobMedia.save(control.media(), context, () => revision === control.revision());
+            } else {
+              const result = await PDWebExt.runtime.sendMessage({
+                action: 'download', url: source.url, filename: source.filename || null,
+                referer: context.referer || location.href
+              });
+              if (!result?.success) throw new Error(result?.error || PD.I18n.t('ytDownloadError'));
+            }
+            if (revision !== control.revision()) return;
+            control.close(); showToast(panel, PD.I18n.t(local ? 'qaBlobRequested' : 'ytAddedToQueue'));
+          } catch (error) {
+            if (revision === control.revision()) showToast(panel, error?.message || PD.I18n.t('ytDownloadError'), true);
+          } finally {
+            sending = false;
+            if (revision === control.revision()) {
+              search.disabled = false;
+              list.querySelectorAll('button').forEach(button => { button.disabled = false; });
+            }
+          }
+        });
+        list.append(item);
+      }
+      if (!list.children.length) list.append(node('div', 'pd-quality-empty', PD.I18n.t('qaImageEmpty')));
+      control.position();
+    }
+    draw();
+  }
+
   let activeController = null;
   let nextPanelId = 0;
   function createPanel(options = {}) {
@@ -278,7 +351,7 @@
     const panel = node('div', ['pd-quality-panel', options.fixed ? 'pd-quality-fixed' : '', options.className || ''].filter(Boolean).join(' '));
     panel.setAttribute('role', 'toolbar'); panel.setAttribute('aria-label', PD.I18n.t('qaToolbar'));
     let contextProvider = options.getContext || (() => null), contextRevision = 0, destroyed = false;
-    let alignment = 'left', open = false, menuOpen = false;
+    let alignment = 'left', open = false, menuOpen = false, mediaType = 'video';
     const dropdown = node('div', 'pd-quality-dropdown'), menu = node('div', 'pd-quality-menu');
     [panel, dropdown, menu].forEach(trackTheme);
     let gestureActive = false, gestureTimer = 0;
@@ -306,7 +379,7 @@
     const closeButton = tool('close', 'pd-quality-close', 'qaHideToolbar', () => { closeDropdown(); options.onClose?.(panel); });
     const mainButton = tool('download', 'pd-quality-main-btn', 'qaChooseFile', () => open ? closeDropdown(true) : void openPicker());
     const pipButton = tool('pip', 'pd-quality-pip', 'pipToggle', async () => {
-      if (pipButton.disabled) return;
+      if (pipButton.disabled || mediaType === 'image') return;
       pipButton.disabled = true;
       try {
         // The source is resolved synchronously so native PiP keeps the click's activation.
@@ -373,17 +446,35 @@
       if (focus && panel.isConnected) mainButton.focus({ preventScroll: true });
     }
     function activate() { if (activeController && activeController !== controller) activeController.closeDropdown(); activeController = controller; }
+    function setMediaType(value) {
+      mediaType = value === 'image' ? 'image' : 'video';
+      panel.dataset.mediaType = mediaType;
+      pipButton.hidden = mediaType === 'image';
+      const label = PD.I18n.t(mediaType === 'image' ? 'qaChooseImage' : 'qaChooseFile');
+      mainButton.title = label; mainButton.setAttribute('aria-label', label);
+      dropdown.setAttribute('aria-label', label);
+      menu.firstElementChild.textContent = PD.I18n.t(mediaType === 'image' ? 'qaRefreshSources' : 'qaReanalyze');
+    }
     function header() {
       dropdown.replaceChildren(); const heading = node('div', 'pd-quality-heading');
       const dismiss = tool('close', 'pd-quality-dismiss', 'ytClose', () => closeDropdown(true));
-      heading.append(node('span', 'pd-quality-dot'), node('strong', '', PD.I18n.t('qaChooseFile')), dismiss); dropdown.append(heading);
+      heading.append(node('span', 'pd-quality-dot'), node('strong', '', PD.I18n.t(mediaType === 'image' ? 'qaChooseImage' : 'qaChooseFile')), dismiss); dropdown.append(heading);
     }
     function loading() {
       header(); const state = node('div', 'pd-quality-empty pd-quality-loading');
-      state.setAttribute('role', 'status'); state.append(node('span', 'pd-quality-spinner'), node('span', '', PD.I18n.t('qaAnalyzing')));
+      state.setAttribute('role', 'status'); state.append(node('span', 'pd-quality-spinner'), node('span', '', PD.I18n.t(mediaType === 'image' ? 'qaImageLoading' : 'qaAnalyzing')));
       dropdown.append(state); position();
     }
-    function sourceChoices(context, sources) {
+    async function requireCurrentSelection(expected, revision) {
+      const current = await contextProvider();
+      if (revision !== contextRevision || destroyed) return null;
+      const fields = ['url', 'pageUrl', 'frameUrl', 'mediaUrl', 'blobUrl', 'mediaKey'];
+      if (!current || fields.some(key => String(current[key] || '') !== String(expected?.[key] || ''))) {
+        throw new Error(PD.I18n.t('qaSourceExpired'));
+      }
+      return current;
+    }
+    function sourceChoices(context, sources, ownerContext = context) {
       if (!sources.length && !context?.blobUrl) return;
       const revision = contextRevision;
       const list = node('div', 'pd-quality-sources');
@@ -396,24 +487,38 @@
         const title = node('strong', '', (source.kind === 'hls' ? 'HLS' : source.kind === 'dash' ? 'DASH' : 'Video') + ' · ' + label);
         // Do not expose query tokens in labels/tooltips.
         title.title = title.textContent;
-        row.append(title, node('small', '', PD.I18n.t(source.scope === 'tab' ? 'qaOtherTabSource' : 'qaPlayerSource')));
+        const scopeLabel = PD.I18n.t(source.scope === 'exact' ? 'qaExactPlayerSource'
+          : source.scope === 'frame' ? 'qaFrameSource' : 'qaOtherTabSource');
+        const size = Number(source.size) > 0
+          ? (Number(source.size) / (1024 * 1024)).toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' MB' : '';
+        const detail = [source.extension?.toUpperCase(), size, scopeLabel].filter(Boolean).join(' · ');
+        row.append(title, node('small', '', detail));
         const actions = node('div', 'pd-quality-source-actions');
         const inspect = node('button', '', PD.I18n.t('qaAnalyzeSource')); inspect.type = 'button';
-        inspect.addEventListener('click', () => { if (revision === contextRevision) void openPicker(true, source); });
-        const download = node('button', '', PD.I18n.t('qaDownloadSource')); download.type = 'button';
+        inspect.addEventListener('click', async () => {
+          if (inspect.disabled || revision !== contextRevision) return;
+          inspect.disabled = true;
+          try {
+            if (await requireCurrentSelection(ownerContext, revision)) void openPicker(true, source);
+          } catch (error) { if (revision === contextRevision) showToast(panel, error?.message, true); }
+          finally { inspect.disabled = false; }
+        });
+        const download = node('button', 'pd-quality-source-download', PD.I18n.t('qaDownloadSource')); download.type = 'button';
         download.addEventListener('click', async () => {
           if (download.disabled || revision !== contextRevision) return;
           download.disabled = true;
           try {
+            const current = await requireCurrentSelection(ownerContext, revision);
+            if (!current) return;
             const result = await PDWebExt.runtime.sendMessage({ action: 'download_player_source',
-              candidateId: source.id, context: { pageUrl: context.pageUrl, frameUrl: context.frameUrl, mediaUrl: context.mediaUrl }, title: context.title });
+              candidateId: source.id, context: { pageUrl: current.pageUrl, frameUrl: current.frameUrl, mediaUrl: current.mediaUrl }, title: current.title });
             if (revision !== contextRevision) return;
             if (!result?.success) throw new Error(result?.error || PD.I18n.t('ytDownloadError'));
             closeDropdown(true); showToast(panel, PD.I18n.t('ytAddedToQueue'));
           } catch (error) { if (revision === contextRevision) showToast(panel, error?.message, true); }
           finally { download.disabled = false; }
         });
-        actions.append(inspect, download); row.append(actions); list.append(row);
+        actions.append(download, inspect); row.append(actions); list.append(row);
       }
       if (context?.blobUrl && PD.BlobMedia) {
         const row = node('div', 'pd-quality-source');
@@ -433,35 +538,64 @@
       }
       dropdown.append(list); position();
     }
-    function failure(context, text, sources = []) {
+    function showCapturedSources(context, sources) {
+      header();
+      const title = node('div', 'pd-quality-subtitle', context.title || '');
+      title.title = title.textContent; dropdown.append(title);
+      dropdown.append(node('div', 'pd-quality-footer', PD.I18n.t('qaCapturedDownloadHint')));
+      sourceChoices(context, sources);
+      const actions = node('div', 'pd-quality-source-actions pd-quality-footer');
+      const refresh = node('button', 'pd-quality-retry', PD.I18n.t('qaRefreshSources'));
+      refresh.type = 'button'; refresh.addEventListener('click', () => void openPicker(true));
+      const analyzePage = node('button', 'pd-quality-retry', PD.I18n.t('qaAnalyzePage'));
+      analyzePage.type = 'button'; analyzePage.addEventListener('click', () => void openPicker(true, null, true));
+      actions.append(refresh, analyzePage); dropdown.append(actions); position();
+    }
+    function failure(context, text, sources = [], ownerContext = context) {
       header(); dropdown.append(node('div', 'pd-quality-empty', text || PD.I18n.t('ytCannotAnalyze')));
       const retry = node('button', 'pd-quality-retry', PD.I18n.t('qaRetry')); retry.type = 'button'; retry.addEventListener('click', () => void openPicker(true)); dropdown.append(retry);
+      if (mediaType === 'image') { position(); return; }
       if (context?.allowDirectFallback) {
         const fallback = node('button', 'pd-quality-retry', PD.I18n.t('qaDirectDownload')); fallback.type = 'button';
         fallback.addEventListener('click', async () => {
           if (fallback.disabled) return; fallback.disabled = true; const revision = contextRevision;
-          const result = await downloadDirectFallback(context);
-          if (revision !== contextRevision) return;
-          fallback.disabled = false;
-          if (result?.success) { closeDropdown(true); showToast(panel, PD.I18n.t('ytAddedToQueue')); }
-          else showToast(panel, result?.error || PD.I18n.t('ytDownloadError'), true);
+          try {
+            if (!await requireCurrentSelection(ownerContext, revision)) return;
+            const result = await downloadDirectFallback(context);
+            if (revision !== contextRevision) return;
+            if (result?.success) { closeDropdown(true); showToast(panel, PD.I18n.t('ytAddedToQueue')); }
+            else showToast(panel, result?.error || PD.I18n.t('ytDownloadError'), true);
+          } catch (error) { if (revision === contextRevision) showToast(panel, error?.message, true); }
+          finally { fallback.disabled = false; }
         });
         dropdown.append(fallback);
       }
-      sourceChoices(context, sources); position();
+      sourceChoices(context, sources, ownerContext); position();
     }
-    async function openPicker(force = false, selectedSource = null) {
+    async function openPicker(force = false, selectedSource = null, analyzePage = false) {
       if (destroyed) return;
       closeDropdown(); activate(); open = true;
       const revision = ++contextRevision;
       dropdown.classList.add('open'); layerHost(panel).append(dropdown);
       mainButton.setAttribute('aria-expanded', 'true'); mainButton.setAttribute('aria-busy', 'true');
       listen(); loading();
-      let context, sources = [];
+      let context, ownerContext, sources = [];
       try {
         context = await contextProvider();
+        ownerContext = context;
         if (revision !== contextRevision || destroyed) return;
-        if (!context?.url) throw new Error(PD.I18n.t('ytCannotAnalyze'));
+        if (!context?.url) throw new Error(PD.I18n.t(mediaType === 'image' ? 'qaImageUnavailable' : 'ytCannotAnalyze'));
+        setMediaType(context.mediaType);
+        if (context.mediaType === 'image') {
+          // Same controller, portal and hover lifecycle as video. Image URLs
+          // go straight to the normal file bridge, never to the video analyzer.
+          renderImageDropdown(dropdown, context, panel, {
+            header, revision: () => contextRevision, close: () => closeDropdown(true), position,
+            context: () => contextProvider(), media: () => options.getVideo?.()
+          });
+          if (document.activeElement === mainButton) dropdown.querySelector('input')?.focus({ preventScroll: true });
+          return;
+        }
         if (context.pageUrl) {
           try {
             const found = await PDWebExt.runtime.sendMessage({ action: 'get_player_sources',
@@ -478,13 +612,12 @@
           context = { ...context, url: source.url, mediaUrl: source.url,
             referer: source.referer || context.referer, headers: source.requestHeaders,
             cacheKey: [context.cacheKey, source.id, source.url].join('|'), allowDirectFallback: false };
-        } else if ((context.frameUrl || (context.blobUrl && sources.some(source => ['hls', 'dash'].includes(source.kind))))
+        } else if (!analyzePage && (context.frameUrl || context.blobUrl)
             && sources.some(source => source.scope !== 'tab')) {
-          // Show captured streams immediately without waiting for an extractor
-          // to reject the embedding page. The user explicitly chooses a source.
-          header(); sourceChoices(context, sources);
-          const retry = node('button', 'pd-quality-retry', PD.I18n.t('qaRefreshSources')); retry.type = 'button';
-          retry.addEventListener('click', () => void openPicker(true)); dropdown.append(retry); position(); return;
+          // MSE/blob players also stream ordinary MP4/WebM over fetch/XHR.
+          // Those captured URLs are usable without a page extractor, just as
+          // HLS/DASH are. Keep page analysis available as an explicit action.
+          showCapturedSources(context, sources); return;
         }
         const response = await analyze(context, force);
         if (revision !== contextRevision || destroyed) return;
@@ -492,11 +625,12 @@
         renderDropdown(dropdown, response, context, panel, { header, revision: () => contextRevision, close: () => closeDropdown(true), position });
         if (document.activeElement === mainButton) dropdown.querySelector('input')?.focus({ preventScroll: true });
       } catch (error) {
-        if (revision === contextRevision && !destroyed) failure(context, error?.message, sources);
+        if (revision === contextRevision && !destroyed) failure(context, error?.message, sources, ownerContext);
       } finally { if (revision === contextRevision) mainButton.removeAttribute('aria-busy'); }
     }
     const controller = {
       element: panel,
+      setMediaType,
       setContextProvider(provider) { closeDropdown(); contextProvider = provider || (() => null); },
       setDropdownAlignment(value) { alignment = value === 'right' ? 'right' : 'left'; position(); },
       invalidateContext() {

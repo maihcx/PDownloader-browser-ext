@@ -125,7 +125,12 @@
     }
 
     if (normalizedMime.startsWith('video/') || VIDEO_EXTENSIONS.has(extension)) {
-      return { mediaType: 'video', kind: 'direct', extension, inferred: false };
+      const mimeExtension = ({
+        'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov',
+        'video/ogg': 'ogv', 'video/x-matroska': 'mkv', 'video/mpeg': 'mpeg'
+      })[normalizedMime] || '';
+      return { mediaType: 'video', kind: 'direct',
+        extension: VIDEO_EXTENSIONS.has(extension) ? extension : mimeExtension || extension, inferred: false };
     }
 
     if (PDF_MIME_TYPES.has(normalizedMime) || PDF_EXTENSIONS.has(extension)) {
@@ -189,6 +194,7 @@
 
   function registerNetworkCandidate(details) {
     if (details.tabId < 0) return null;
+    if (details.statusCode && (details.statusCode < 200 || details.statusCode >= 300)) return null;
 
     const contentType = headerValue(details.responseHeaders, 'content-type');
     const contentDisposition = headerValue(details.responseHeaders, 'content-disposition');
@@ -207,6 +213,11 @@
     if (!classification) return null;
 
     const contentLength = Number.parseInt(headerValue(details.responseHeaders, 'content-length'), 10) || 0;
+    // A partial MP4 response is still a whole-file URL. Record its total size
+    // for the picker, and keep Range out of forwarded download headers.
+    const rangeTotal = Number(headerValue(details.responseHeaders, 'content-range')
+      .match(/^bytes\s+\d+-\d+\/(\d+)$/i)?.[1]) || 0;
+    const fileSize = Number.isSafeInteger(rangeTotal) && rangeTotal > 0 ? rangeTotal : contentLength;
     const metadata = requestMetadata.get(details.requestId) || {};
     const likelySegment = isLikelySegment(
       details.url,
@@ -222,7 +233,7 @@
       mime: contentType,
       extension: classification.extension,
       filename,
-      size: contentLength,
+      size: fileSize,
       referer: metadata.referer || details.documentUrl || details.initiator || '',
       pageUrl: details.documentUrl || metadata.referer || details.initiator || '',
       source: 'network',

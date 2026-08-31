@@ -1,4 +1,19 @@
 {
+  "qaExactPlayerSource": { "message": "Khớp nguồn của video đang chọn" },
+  "qaFrameSource": { "message": "Cùng trang/khung — có thể thuộc video khác" },
+  "qaCapturedDownloadHint": { "message": "Có thể tải tệp đã bắt mà không cần phân tích trang. Hãy kiểm tra nguồn vì một trang/khung có thể chứa nhiều video." },
+  "qaAnalyzePage": { "message": "Phân tích trang" },
+  "qaChooseImage": { "message": "Chọn ảnh để tải" },
+  "qaImage": { "message": "Ảnh" },
+  "qaImageSearch": { "message": "Tìm nguồn ảnh, định dạng, kích thước…" },
+  "qaImageCurrent": { "message": "Ảnh đang hiển thị" },
+  "qaImageVariant": { "message": "Nguồn ảnh khác" },
+  "qaImageLinked": { "message": "Ảnh được liên kết" },
+  "qaImageLoading": { "message": "Đang đọc nguồn ảnh…" },
+  "qaImageEmpty": { "message": "Không có nguồn ảnh phù hợp." },
+  "qaImageChanged": { "message": "Ảnh đã thay đổi. Hãy mở lại bảng tải." },
+  "qaImageUnavailable": { "message": "Nguồn ảnh này không còn đọc được. Hãy tải lại ảnh rồi thử lại." },
+  "qaImageHint": { "message": "Chọn nguồn để gửi đến PDownloader. Giá trị w/x do trang khai báo; ảnh blob được lưu bằng trình duyệt." },
   "qaCapturedSources": { "message": "Nguồn media đã bắt được" },
   "qaOtherTabSource": { "message": "Nguồn khác trong tab — kiểm tra trước khi tải" },
   "qaPlayerSource": { "message": "Nguồn bắt được trong trình phát / khung này" },
@@ -8,7 +23,7 @@
   "qaSourceExpired": { "message": "Nguồn này không còn khả dụng. Hãy làm mới danh sách." },
   "qaBlobHint": { "message": "Tệp cục bộ: lưu bằng trình duyệt. Blob dạng luồng cần nguồn HLS/DASH hoặc HTTP đã bắt được." },
   "qaSaveBlob": { "message": "Lưu video cục bộ bằng trình duyệt" },
-  "qaBlobRequested": { "message": "Đã yêu cầu trình duyệt lưu video." },
+  "qaBlobRequested": { "message": "Đã yêu cầu trình duyệt lưu tệp." },
   "qaBlobChanged": { "message": "Video đã thay đổi. Hãy mở lại bảng tải." },
   "qaBlobUnavailable": { "message": "Blob này không đọc được thành tệp video (có thể là luồng phát). Hãy phát video rồi làm mới nguồn đã bắt được." },
   "popupCompanion": {
@@ -464,10 +479,10 @@
     "message": "Đang thêm PDF…"
   },
   "qaToolbar": {
-    "message": "Điều khiển video"
+    "message": "Điều khiển ảnh và video"
   },
   "qaHideToolbar": {
-    "message": "Ẩn thanh công cụ của video này"
+    "message": "Ẩn thanh công cụ của mục này"
   },
   "qaChooseFile": {
     "message": "Chọn tệp để tải"

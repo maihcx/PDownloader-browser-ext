@@ -26,7 +26,7 @@ const MEDIA_CONTEXT_SELECTOR = [
 ].join(',');
 const MEDIA_MUTATION_ATTRIBUTES = [
   'src', 'data-src', 'poster', 'href', 'data-video-id', 'data-media-id',
-  'class', 'open', 'hidden', 'aria-hidden'
+  'class', 'open', 'hidden', 'aria-hidden', 'srcset', 'sizes', 'media', 'alt'
 ];
 const MEDIA_SURFACE_SELECTOR = [
   '[aria-label="Video player"]',
@@ -51,6 +51,7 @@ let _activeLinkedItem = null;
 let _pointerFeedAnchor = null;
 let _feedPointerInside = false;
 let _feedHideTimer = 0;
+let _imageHideTimer = 0;
 let _btn = null;
 let _qualityPanel = null;
 let _dismissedMediaKey = '';
@@ -205,7 +206,7 @@ function isLikelyMediaFrame(frame) {
 }
 
 function isMediaElement(element) {
-  return element instanceof HTMLVideoElement || isLikelyMediaFrame(element)
+  return element instanceof HTMLVideoElement || PD.ImageMedia?.isEligible(element) || isLikelyMediaFrame(element)
     || (element instanceof Element && safeMatches(element, PLAYER_PLACEHOLDER_SELECTOR)
       && !element.querySelector('video,iframe'));
 }
@@ -290,6 +291,7 @@ function getMediaRenderSurface(media) {
   // visual rendering. Several modern players mark their visual media layer
   // aria-hidden while it remains the real playback surface.
   if (isElementVisuallyRendered(media, 60, 40)) return media;
+  if (media instanceof HTMLImageElement) return null;
 
   // MSE/canvas-heavy players frequently keep the <video> itself transparent
   // or visually hidden behind a thumbnail/control layer. In that case, use a
@@ -454,6 +456,7 @@ function mountButtonForMedia(media) {
 }
 
 function hideButton(clearActive = true) {
+  clearImageHide();
   if (_btn) {
     _btn.style.opacity = '0';
     _btn.style.visibility = 'hidden';
@@ -488,6 +491,7 @@ function positionBtn(media) {
 
   const rect = surface.getBoundingClientRect();
   const btn = mountButtonForMedia(media);
+  _qualityPanel?.setMediaType(media instanceof HTMLImageElement ? 'image' : 'video');
 
   const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
   const estimatedWidth = Math.max(btn.offsetWidth || 0, 138);
@@ -520,6 +524,7 @@ function isQualityPanelTarget(target) {
 }
 
 function scheduleHide(delay = 450) {
+  if (_activeMedia instanceof HTMLImageElement) { scheduleImageHide(); return; }
   if (isQualityPanelInteractionActive()) {
     clearHide();
     return;
@@ -545,6 +550,60 @@ function clearHide() {
     clearTimeout(_hideTimer);
     _hideTimer = null;
   }
+}
+
+function clearImageHide() {
+  clearTimeout(_imageHideTimer);
+  _imageHideTimer = 0;
+}
+
+function scheduleImageHide() {
+  if (_imageHideTimer) return;
+  const image = _activeMedia;
+  _imageHideTimer = setTimeout(() => {
+    _imageHideTimer = 0;
+    if (_activeMedia !== image || !(image instanceof HTMLImageElement)) return;
+    // An open list or its focused input does not pin an image after pointer
+    // exit. Allow the small gap between the toolbar and portaled popup.
+    if (_qualityPanel?.isPointerInteractionActive?.()) return;
+    hideButton(true);
+  }, 240);
+}
+
+function imageAtPoint(target, x, y) {
+  if (isQualityPanelTarget(target)) return null;
+  for (const element of new Set([target, ...(document.elementsFromPoint?.(x, y) || [])])) {
+    // Do not select a photo painted behind an unrelated dialog or video.
+    if (element !== target && !(target instanceof Element && target.contains(element))) continue;
+    if (PD.ImageMedia?.isEligible(element) && isElementVisuallyRendered(element, 120, 120)
+        && containsPoint(element.getBoundingClientRect(), x, y)) return element;
+  }
+  return null;
+}
+
+function selectPointedImage(target, x, y) {
+  const wasImage = _activeMedia instanceof HTMLImageElement;
+  if (isQualityPanelTarget(target) || _qualityPanel?.isGestureActive?.()) {
+    if (wasImage) clearImageHide();
+    return wasImage;
+  }
+  const image = imageAtPoint(target, x, y);
+  if (image) {
+    if (_activeMedia !== image) {
+      hideButton(true);
+      // A photo is not the next video feed card. Release any pending preview
+      // selection so it cannot invalidate the image picker on pointer move.
+      _pointerFeedAnchor = null; _feedPointerInside = false; clearFeedHide();
+    }
+    clearImageHide();
+    activateDirectMedia(image, image);
+    return true;
+  }
+  if (!wasImage) return false;
+  const media = safeClosest(target, MEDIA_ELEMENT_SELECTOR);
+  if (isMediaElement(media)) { hideButton(true); return false; }
+  scheduleImageHide();
+  return true;
 }
 
 function getMediaTitle(media, contextNode) {
@@ -661,7 +720,7 @@ function selectPointedFeedCard(target, x, y) {
 }
 
 function getMediaAnchor(media, item = PD.MediaContext.getItemLink(media)) {
-  if (!(media instanceof Element) || media instanceof HTMLIFrameElement) return media;
+  if (!(media instanceof Element) || media instanceof HTMLIFrameElement || media instanceof HTMLImageElement) return media;
   // Hover previews can be portaled outside the feed card and disappear when
   // our toolbar receives the pointer. Use the player title link as well as a
   // wrapping link: an <a> around the preview need not have an href at all.
@@ -695,6 +754,9 @@ function getMediaAnchor(media, item = PD.MediaContext.getItemLink(media)) {
 }
 
 function getMediaIdentity(media, anchor = getMediaAnchor(media), item = PD.MediaContext.getItemLink(media)) {
+  if (media instanceof HTMLImageElement) {
+    return { page: location.href, image: PD.ImageMedia.resolve(media)?.cacheKey || 'unavailable' };
+  }
   const identityNode = safeClosest(anchor, '[data-video-id],[data-media-id]');
   const article = safeClosest(anchor, 'article,[role="article"]');
   const bookmarks = safeQueryAll(article, 'a[rel~="bookmark"][href]');
@@ -755,6 +817,7 @@ function addMediaFromRoot(root, candidates) {
 }
 
 function getMediaContextNode(target, media) {
+  if (media instanceof HTMLImageElement) return media;
   const targetElement = target instanceof Element ? target : null;
   const targetContext = safeClosest(targetElement, MEDIA_CONTEXT_SELECTOR);
   if (safeMatches(targetContext, '[aria-label="Video player"]')) {
@@ -770,6 +833,7 @@ function getMediaContextNode(target, media) {
 }
 
 function getMediaPlayerNode(target, media, contextNode) {
+  if (media instanceof HTMLImageElement) return media;
   const targetElement = target instanceof Element ? target : null;
   const pointedPlayer = safeClosest(targetElement, '[aria-label="Video player"]');
   if (pointedPlayer) return pointedPlayer;
@@ -937,6 +1001,7 @@ function getMediaUnderLastPointer() {
 }
 
 function activateDirectMedia(media, target = media) {
+  if (media instanceof HTMLImageElement && !IS_TOP_FRAME) return false;
   if (!matchesPointerFeedSelection(media)) return false;
   if (isLinkedItemPinned()) {
     if (media !== _activeMedia) return false;
@@ -1114,6 +1179,20 @@ function queueMediaScan() {
     _scanFrame = 0;
     if (_contextInvalidated) return;
 
+    // Images are hover-selected only. Automatic video discovery must not
+    // reopen them or replace their picker with an unrelated playing video.
+    if (_activeMedia instanceof HTMLImageElement) {
+      if (!isRenderedMedia(_activeMedia)) { hideButton(true); return; }
+      activateMediaPlayer(_activeMedia, _activeMedia);
+      const pointer = _lastPointerEvent;
+      const target = pointer && document.elementFromPoint?.(pointer.clientX, pointer.clientY);
+      if (isQualityPanelTarget(target) || _qualityPanel?.isGestureActive?.()
+          || (pointer && imageAtPoint(target, pointer.clientX, pointer.clientY) === _activeMedia)) {
+        clearImageHide(); positionBtn(_activeMedia);
+      } else scheduleImageHide();
+      return;
+    }
+
     // Pin the card before reconciling the disposable portal player. This is
     // also the URL snapshot used by getContext, not just a visual workaround.
     if (_activeLinkedItem && !isLinkedItemCurrent()) hideButton(true);
@@ -1164,6 +1243,7 @@ function processPointerEvent() {
 
   const pointed = getMediaUnderLastPointer();
   const target = pointed?.target || _lastPointerEvent.target;
+  if (selectPointedImage(target, _lastPointerEvent.clientX, _lastPointerEvent.clientY)) return;
   selectPointedFeedCard(target, _lastPointerEvent.clientX, _lastPointerEvent.clientY);
 
   // The quality panel is its own interaction surface. Never reinterpret
@@ -1192,6 +1272,7 @@ function initListeners() {
       clientY: event.clientY,
       target: event.target
     };
+    if (selectPointedImage(event.target, event.clientX, event.clientY)) return;
     selectPointedFeedCard(event.target, event.clientX, event.clientY);
   };
 
@@ -1205,6 +1286,11 @@ function initListeners() {
   // a reliable hand-off point for embedded players.
   document.addEventListener('mouseover', event => {
     if (isQualityPanelTarget(event.target)) { clearHide(); return; }
+    if (event.target instanceof HTMLImageElement || _activeMedia instanceof HTMLImageElement) {
+      rememberPointer(event);
+      queuePointerProcessing();
+      return;
+    }
     const media = safeClosest(event.target, MEDIA_ELEMENT_SELECTOR);
     if (isMediaElement(media)) {
       rememberPointer(event);
@@ -1218,6 +1304,8 @@ function initListeners() {
       return;
     }
     rememberPointer(event);
+
+    if (_activeMedia instanceof HTMLImageElement) { queuePointerProcessing(); return; }
 
     const pointed = getMediaUnderLastPointer();
     if (pointed?.media) activateDirectMedia(pointed.media, pointed.target);
@@ -1247,7 +1335,8 @@ function initListeners() {
     // video -> toolbar and icon -> button transitions. Only leaving the
     // document should schedule a document-level hide.
     if (event.target === document.documentElement && !event.relatedTarget) {
-      if (_pointerFeedAnchor) { _feedPointerInside = false; scheduleFeedHide(); }
+      if (_activeMedia instanceof HTMLImageElement) scheduleImageHide();
+      else if (_pointerFeedAnchor) { _feedPointerInside = false; scheduleFeedHide(); }
       else scheduleHide(150);
     }
   }, true);
@@ -1265,6 +1354,11 @@ function initListeners() {
   document.addEventListener('emptied', handleMediaIdentityChange, true);
   document.addEventListener('loadedmetadata', handleMediaIdentityChange, true);
   document.addEventListener('load', event => {
+    if (event.target instanceof HTMLImageElement) {
+      if (event.target === _activeMedia) queueMediaScan();
+      if (_lastPointerEvent) queuePointerProcessing(true);
+      return;
+    }
     if (event.target instanceof HTMLIFrameElement && isLikelyMediaFrame(event.target)) {
       if (event.target === _activeMedia) {
         _qualityPanel?.invalidateContext?.();
@@ -1280,6 +1374,7 @@ function initListeners() {
     for (const mutation of mutations) {
       if (mutation.type === 'childList') {
         if (_activeMedia && !_activeMedia.isConnected) shouldScan = true;
+        if (_activeMedia instanceof HTMLImageElement && mutation.target === _activeMedia.closest('picture')) shouldScan = true;
         for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
           if (!(node instanceof Element)) continue;
           if (isMediaElement(node) || safeQueryAll(node, MEDIA_ELEMENT_SELECTOR).length) {
@@ -1291,6 +1386,8 @@ function initListeners() {
         const target = mutation.target;
         if (!(target instanceof Element)) continue;
         if (isMediaElement(target)
+            || (_activeMedia instanceof HTMLImageElement && target.localName === 'source'
+              && target.parentElement === _activeMedia.closest('picture'))
             || (mutation.attributeName === 'href' && _activeMedia
               && safeClosest(_activeMedia, PLAYER_PLACEHOLDER_SELECTOR)?.contains(target))
             || target === _activeMedia
@@ -1324,10 +1421,14 @@ function initListeners() {
     // Capture-phase scroll listeners also receive scrolling from the dropdown's
     // own list. Scrolling inside the panel must never be treated as the user
     // leaving the media player.
-    if (isQualityPanelTarget(event.target) || isQualityPanelInteractionActive()) {
+    if (isQualityPanelTarget(event.target)) {
       clearHide();
       return;
     }
+    if (_activeMedia instanceof HTMLImageElement) {
+      queuePointerProcessing(true); queueMediaScan(); return;
+    }
+    if (isQualityPanelInteractionActive()) { clearHide(); return; }
 
     if (_lastPointerEvent) {
       queuePointerProcessing(true);
@@ -1367,7 +1468,7 @@ function initListeners() {
   window.addEventListener('pageshow', refresh);
   document.addEventListener('visibilitychange', refresh);
   window.addEventListener('pagehide', event => {
-    if (!event.persisted) { clearFeedHide(); clearInterval(scanTimer); observer.disconnect(); _qualityPanel?.destroy(); }
+    if (!event.persisted) { clearImageHide(); clearFeedHide(); clearInterval(scanTimer); observer.disconnect(); _qualityPanel?.destroy(); }
   });
   queueMediaScan();
 }

@@ -44,7 +44,7 @@
     } catch { return false; }
   }
   function getItemLink(media) {
-    if (!media?.isConnected || media.localName === 'iframe') return null;
+    if (!media?.isConnected || media.localName === 'iframe' || media.localName === 'img') return null;
     const wrapper = media.closest('a[href]');
     const wrappingUrl = linkUrl(wrapper);
     let parent = media.parentElement;
@@ -68,6 +68,7 @@
   }
   function resolve(media, contextNode, info = {}) {
     if (!media?.isConnected) return null;
+    if (media.localName === 'img') return PD.ImageMedia?.resolve(media, info) || null;
     const pageUrl = httpUrl(location.href);
     const mediaUrl = getDirectMediaUrl(media);
     const frameUrl = media.localName === 'iframe' ? httpUrl(info.frameUrl || media.src) : '';
