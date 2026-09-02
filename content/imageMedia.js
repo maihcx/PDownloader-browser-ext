@@ -21,6 +21,71 @@
     try { return new URL(url).pathname.match(IMAGE_EXTENSION)?.[1]?.toLowerCase() || ''; }
     catch (_) { return ''; }
   }
+  function parentOf(element) {
+    return element.assignedSlot || element.parentElement || element.getRootNode?.().host || null;
+  }
+  function getPhotoLink(image) {
+    if (!(image instanceof HTMLImageElement) || !image.isConnected) return null;
+    const link = image.closest('a[href]');
+    if (!link) return null;
+    try {
+      const url = new URL(link.getAttribute('href'), document.baseURI);
+      if (!/^https?:$/.test(url.protocol) || !/(?:^|\/)photos?(?:\/|$)/i.test(url.pathname)) return null;
+      // The selected photo link is an owner, never a source URL to download.
+      // A gallery/feed link containing several images is not a single photo.
+      const images = link.querySelectorAll('img');
+      return images.length === 1 && images[0] === image && !link.querySelector('video,iframe') ? link : null;
+    } catch (_) { return null; }
+  }
+  function hasVisibleSize(image, rect = getVisibleRect(image)) {
+    if (!rect) return false;
+    // Explicit photo tiles may be narrow or partially clipped in a gallery.
+    // Keep the stricter generic-image threshold and never include tiny avatars.
+    const photo = !!getPhotoLink(image);
+    return rect.width >= (photo ? 96 : 120) && rect.height >= (photo ? 64 : 120);
+  }
+  function getVisibleRect(image) {
+    if (!(image instanceof HTMLImageElement) || !image.isConnected || !image.getClientRects().length) return null;
+    const box = image.getBoundingClientRect();
+    let left = Math.max(0, box.left), top = Math.max(0, box.top);
+    let right = Math.min(document.documentElement.clientWidth || innerWidth, box.right);
+    let bottom = Math.min(document.documentElement.clientHeight || innerHeight, box.bottom);
+    const rootStyle = getComputedStyle(document.documentElement);
+    const bodyOverflowUsesViewport = rootStyle.overflowX === 'visible' && rootStyle.overflowY === 'visible';
+    for (let node = image, depth = 0; node && depth < 64; node = parentOf(node), depth++) {
+      const style = getComputedStyle(node);
+      if (node.hidden || style.display === 'none' || style.contentVisibility === 'hidden'
+          || Number.parseFloat(style.opacity || '1') <= 0.01
+          || (node === image && /^(hidden|collapse)$/.test(style.visibility))) return null;
+      // Non-replaced inline boxes have no client box and overflow does not
+      // make them clipping containers. Do not intersect a visible photo with
+      // an inline wrapper's zero clientWidth/clientHeight.
+      // Root overflow (and propagated body overflow) clips the viewport,
+      // already intersected above, not a possibly zero-height body box.
+      const viewportClip = node === document.documentElement || (node === document.body && bodyOverflowUsesViewport);
+      if (node !== image && !viewportClip && style.display !== 'contents' && style.display !== 'inline') {
+        const paintClip = /(?:^|\s)(?:paint|strict|content)(?:\s|$)/.test(style.contain);
+        const clipX = paintClip || /^(hidden|clip|auto|scroll|overlay)$/.test(style.overflowX);
+        const clipY = paintClip || /^(hidden|clip|auto|scroll|overlay)$/.test(style.overflowY);
+        if (clipX || clipY) {
+          // Clip to the ancestor's client box (excluding border/scrollbars).
+          // Scale client metrics into viewport coordinates for scaled cards.
+          const rect = node.getBoundingClientRect();
+          const scaleX = node.offsetWidth ? rect.width / node.offsetWidth : 1;
+          const scaleY = node.offsetHeight ? rect.height / node.offsetHeight : 1;
+          const clipLeft = rect.left + node.clientLeft * scaleX;
+          const clipTop = rect.top + node.clientTop * scaleY;
+          if (clipX) { left = Math.max(left, clipLeft); right = Math.min(right, clipLeft + node.clientWidth * scaleX); }
+          if (clipY) { top = Math.max(top, clipTop); bottom = Math.min(bottom, clipTop + node.clientHeight * scaleY); }
+        }
+      }
+      if (right <= left || bottom <= top) return null;
+      if (node === document.documentElement) break;
+    }
+    // Small ancestors with overflow:visible do NOT crop the image. Only actual
+    // clipping boxes above affect its visible area; source pixels stay intact.
+    return { x: left, y: top, left, top, right, bottom, width: right - left, height: bottom - top };
+  }
   function getVideoOwner(image) {
     if (!(image instanceof HTMLImageElement) || !image.isConnected) return null;
     const pictureRect = image.getBoundingClientRect();
@@ -66,8 +131,7 @@
             || /\.(?:mp4|webm|m3u8|mpd)$/i.test(url.pathname)) return false;
       } catch (_) {}
     }
-    const rect = image.getBoundingClientRect();
-    return rect.width >= 120 && rect.height >= 120;
+    return hasVisibleSize(image);
   }
 
   function srcsetEntries(value) {
@@ -135,5 +199,5 @@
       allowDirectFallback: false
     };
   }
-  PD.ImageMedia = Object.freeze({ isEligible, resolve, getVideoOwner });
+  PD.ImageMedia = Object.freeze({ isEligible, resolve, getVideoOwner, getVisibleRect, getPhotoLink, hasVisibleSize });
 })(globalThis);

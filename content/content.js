@@ -9,6 +9,9 @@ const VIDEO_CONTEXT_SELECTOR = [
 
 // One DOM scanner for every host. No provider/domain dispatch.
 const PLAYER_PLACEHOLDER_SELECTOR = '.html5-video-player,.jwplayer,.video-js,.dplayer,[data-video-player]';
+// A player shell groups its video, poster and sibling controls; it is not an
+// additional media candidate. In particular, do not add .plyr to the scanner.
+const PLAYER_CONTAINER_SELECTOR = PLAYER_PLACEHOLDER_SELECTOR + ',.plyr';
 const MEDIA_ELEMENT_SELECTOR = 'video,iframe,' + PLAYER_PLACEHOLDER_SELECTOR;
 const MEDIA_CONTEXT_SELECTOR = [
   '[data-video-id]',
@@ -116,6 +119,7 @@ function safeMatches(element, selector) {
 
 function getSelectorParent(element) {
   if (!(element instanceof Element)) return null;
+  if (element.assignedSlot) return element.assignedSlot;
   if (element.parentElement) return element.parentElement;
 
   // `Element.closest()` stops at a shadow root. For media scanning it is more
@@ -153,6 +157,129 @@ function safeQueryAll(root, selector) {
   const normalized = normalizeSelector(selector);
   if (!isValidSelector(normalized)) return [];
   try { return root.querySelectorAll(normalized); } catch (_) { return []; }
+}
+
+function containsComposedElement(container, element) {
+  if (!(container instanceof Element) || !(element instanceof Element)) return false;
+  if (container === element || container.contains(element)) return true;
+  for (let node = element, depth = 0; node && depth < 64; depth++, node = getSelectorParent(node)) {
+    if (node === container) return true;
+  }
+  return false;
+}
+
+function getPaintedElementAtPoint(x, y) {
+  let element = document.elementFromPoint?.(x, y) || null;
+  const visited = new Set();
+  // Document-level hits may be retargeted to a custom-element host. Only
+  // descend the top painted branch of an OPEN shadow root; never look through
+  // unrelated dialogs/overlays to a player underneath them.
+  for (let depth = 0; element && depth < 16; depth++) {
+    const shadow = element.shadowRoot;
+    if (!shadow || visited.has(shadow)) break;
+    visited.add(shadow);
+    const inner = shadow.elementFromPoint?.(x, y) || shadow.elementsFromPoint?.(x, y)?.[0];
+    if (!(inner instanceof Element) || inner === element) break;
+    element = inner;
+  }
+  return element;
+}
+
+function getPaintedStackAtPoint(x, y) {
+  const top = getPaintedElementAtPoint(x, y);
+  const stack = top ? [top] : [];
+  // Retain composed ancestors, including slot/host boundaries, for ownership
+  // lookup when Flutter projects a light-DOM video into its rendering tree.
+  for (let node = getSelectorParent(top), depth = 0; node && depth < 64; depth++, node = getSelectorParent(node)) stack.push(node);
+  stack.push(...(document.elementsFromPoint?.(x, y) || []));
+  return [...new Set(stack)];
+}
+
+function getKnownPlayerContainer(media) {
+  if (media instanceof HTMLImageElement || media instanceof HTMLIFrameElement) return null;
+  const player = safeClosest(media, PLAYER_CONTAINER_SELECTOR);
+  if (!player) return null;
+  const owned = [...safeQueryAll(player, 'video,iframe')];
+  if (safeMatches(player, 'video,iframe')) owned.unshift(player);
+  return owned.length === 1 && (owned[0] === media || player === media) ? player : null;
+}
+
+function getSiblingPlayerGroup(media) {
+  if (!(media instanceof HTMLVideoElement) || !media.isConnected) return null;
+  // Some players put their accessible control layer in a parallel DOM branch,
+  // not above the <video>. Resolve their first common, single-media container;
+  // obfuscated wrapper classes and blob URLs are not player identity.
+  let root = getSelectorParent(media);
+  for (let depth = 0; root && depth < 16; depth++, root = getSelectorParent(root)) {
+    if (root === document.body || root === document.documentElement) break;
+    const owned = [...safeQueryAll(root, 'video,iframe')];
+    if (owned.length > 1) return null;
+    if (owned.length !== 1 || owned[0] !== media) continue;
+    const controls = [...safeQueryAll(root, '[aria-label="Video player"]')];
+    if (controls.length > 1) return null;
+    if (controls.length === 1 && !containsComposedElement(controls[0], media)) {
+      return { container: root, controls: controls[0] };
+    }
+  }
+  return null;
+}
+
+function getWrappingMediaCard(media, item = PD.MediaContext.getItemLink(media)) {
+  if (!(media instanceof Element) || media instanceof HTMLImageElement || media instanceof HTMLIFrameElement) return null;
+  const card = safeClosest(media, 'a[href]');
+  if (!card || card === media || !item?.url
+      || !PD.MediaContext.linksMatch(item.url, PD.MediaContext.linkUrl(card))
+      || !card.querySelector('img,picture')) return null;
+  const owned = [...safeQueryAll(card, 'video,iframe')];
+  // A thumbnail link with one inline preview is also a stable feed card.
+  // Never adopt a multi-player container or a publisher/profile link.
+  return owned.length === 1 && (owned[0] === media || media.contains(owned[0])) ? card : null;
+}
+
+function isMediaHitAtPoint(media, x, y, painted = getPaintedElementAtPoint(x, y)) {
+  if (!(painted instanceof Element)) return false;
+  const surface = getMediaRenderSurface(media);
+  if (!surface) return false;
+  if (isQualityPanelTarget(painted)) return media === _activeMedia;
+  if (media instanceof HTMLImageElement) return isImageHitAtPoint(media, painted, x, y);
+  if (containsComposedElement(surface, painted)) return true;
+  if (painted instanceof HTMLImageElement && PD.ImageMedia?.getVideoOwner(painted) === media) return true;
+  const player = getKnownPlayerContainer(media);
+  if (player) {
+    if (containsComposedElement(player, painted)) return true;
+    // A detached preview can put its clickable cover/controls OUTSIDE the
+    // inner playback engine. Accept only its single-video preview wrapper,
+    // over the thumbnail whose permalink matches this player's title link.
+    const item = isFeedPreview(media) && PD.MediaContext.getItemLink(media);
+    const anchor = item?.url && getMediaAnchor(media, item);
+    if (anchor?.localName === 'a' && !anchor.contains(media)
+        && containsPoint(anchor.getBoundingClientRect(), x, y)
+        && PD.MediaContext.linksMatch(item.url, PD.MediaContext.linkUrl(anchor))) {
+      let root = getSelectorParent(player);
+      for (let depth = 0; root && depth < 10; depth++, root = getSelectorParent(root)) {
+        if (root === document.body || root === document.documentElement) break;
+        const owned = [...safeQueryAll(root, 'video,iframe')];
+        if (owned.length > 1) break;
+        if (owned.length === 1 && owned[0] === media
+            && safeMatches(root, '[class*="preview" i],[id*="preview" i]')
+            && containsComposedElement(root, painted)) return true;
+      }
+    }
+    return false;
+  }
+  const card = getWrappingMediaCard(media);
+  if (card && containsComposedElement(card, painted)) return true;
+  const siblingPlayer = getSiblingPlayerGroup(media);
+  // The top painted node may be the sibling play/mute/seek layer. Both hover
+  // and periodic scans must recognize it as this video's own controls. Do not
+  // accept arbitrary overlays elsewhere inside a shared feed/page container.
+  if (siblingPlayer && containsComposedElement(siblingPlayer.controls, painted)) return true;
+  // A <video class="video-..."> must not become its own context: a sibling
+  // poster/control layer belongs to the common container, not to the video.
+  const context = safeClosest(getSelectorParent(surface), MEDIA_CONTEXT_SELECTOR);
+  if (!context || !containsComposedElement(context, painted)) return false;
+  const owned = [...safeQueryAll(context, 'video,iframe')];
+  return owned.length === 1 && owned[0] === media;
 }
 
 function getFrameSource(frame) {
@@ -275,13 +402,15 @@ function isElementVisuallyRendered(element, minWidth = 1, minHeight = 1) {
   if (!element.getClientRects().length) return false;
 
   let current = element;
-  for (let depth = 0; current && depth < 24; depth++, current = current.parentElement) {
+  for (let depth = 0; current && depth < 64; depth++, current = getSelectorParent(current)) {
     if (current.hidden) return false;
 
     const style = getComputedStyle(current);
+    // visibility is inherited and may be explicitly restored on a slotted
+    // child. Its own computed value is authoritative; opacity/display on
+    // ancestors still suppress the entire rendered subtree.
     if (style.display === 'none'
-        || style.visibility === 'hidden'
-        || style.visibility === 'collapse'
+        || (current === element && (style.visibility === 'hidden' || style.visibility === 'collapse'))
         || Number.parseFloat(style.opacity || '1') <= 0.01) {
       return false;
     }
@@ -293,6 +422,9 @@ function isElementVisuallyRendered(element, minWidth = 1, minHeight = 1) {
 }
 
 function getMediaRenderSurface(media) {
+  // A hover-selected permalink card is usable before its disposable preview
+  // creates a <video>. It is not an image or an automatic scan candidate.
+  if (media === _activeLinkedItem?.anchor && isLinkedItemCurrent()) return media;
   if (!isMediaElement(media) || !media.isConnected) return null;
 
   // Prefer the media node when it is actually painted. `aria-hidden` is
@@ -301,6 +433,12 @@ function getMediaRenderSurface(media) {
   // aria-hidden while it remains the real playback surface.
   if (isElementVisuallyRendered(media, 60, 40)) return media;
   if (media instanceof HTMLImageElement) return null;
+  const card = getWrappingMediaCard(media);
+  if (card && isElementVisuallyRendered(card, 120, 70)) return card;
+  const siblingPlayer = getSiblingPlayerGroup(media);
+  if (siblingPlayer && isElementVisuallyRendered(siblingPlayer.controls, 120, 70)) {
+    return siblingPlayer.controls;
+  }
 
   // MSE/canvas-heavy players frequently keep the <video> itself transparent
   // or visually hidden behind a thumbnail/control layer. In that case, use a
@@ -334,18 +472,11 @@ function isTopmostAtCenter(media) {
   if (!(media instanceof Element)) return false;
   const surface = getMediaRenderSurface(media);
   if (!surface) return false;
-  const rect = surface.getBoundingClientRect();
+  const rect = media instanceof HTMLImageElement ? PD.ImageMedia?.getVisibleRect(media) : surface.getBoundingClientRect();
+  if (!rect) return false;
   const x = clamp(rect.left + rect.width / 2, 0, Math.max(0, window.innerWidth - 1));
   const y = clamp(rect.top + rect.height / 2, 0, Math.max(0, window.innerHeight - 1));
-  const painted = document.elementFromPoint?.(x, y);
-  if (!(painted instanceof Element)) return false;
-  if (painted === surface || surface.contains?.(painted)) return true;
-  if (painted instanceof HTMLImageElement && PD.ImageMedia?.getVideoOwner(painted) === media) return true;
-
-  const mediaContext = safeClosest(surface, MEDIA_CONTEXT_SELECTOR)
-    || safeClosest(media, MEDIA_CONTEXT_SELECTOR);
-  const paintedContext = safeClosest(painted, MEDIA_CONTEXT_SELECTOR);
-  return !!mediaContext && mediaContext === paintedContext;
+  return isMediaHitAtPoint(media, x, y);
 }
 
 function getBtn() {
@@ -499,7 +630,8 @@ function positionBtn(media) {
   // leave timeout must not hide it again after this successful reconciliation.
   clearHide();
 
-  const rect = surface.getBoundingClientRect();
+  const rect = media instanceof HTMLImageElement ? PD.ImageMedia?.getVisibleRect(media) : surface.getBoundingClientRect();
+  if (!rect) { hideButton(true); return; }
   const btn = mountButtonForMedia(media);
   _qualityPanel?.setMediaType(media instanceof HTMLImageElement ? 'image' : 'video');
 
@@ -535,6 +667,7 @@ function isQualityPanelTarget(target) {
 
 function scheduleHide(delay = 450) {
   if (_activeMedia instanceof HTMLImageElement) { scheduleImageHide(); return; }
+  if (isLinkedItemPinned()) { clearHide(); return; }
   if (isQualityPanelInteractionActive()) {
     clearHide();
     return;
@@ -542,6 +675,7 @@ function scheduleHide(delay = 450) {
   if (_hideTimer) return;
   _hideTimer = setTimeout(() => {
     _hideTimer = null;
+    if (isLinkedItemPinned()) { positionBtn(_activeMedia); return; }
     if (isQualityPanelInteractionActive()) return;
     // Pointer events stop reaching this document inside a cross-origin
     // iframe. Leaving the parent document is therefore not evidence that the
@@ -576,18 +710,65 @@ function scheduleImageHide() {
     // An open list or its focused input does not pin an image after pointer
     // exit. Allow the small gap between the toolbar and portaled popup.
     if (_qualityPanel?.isPointerInteractionActive?.()) return;
+    if (_lastPointerEvent) {
+      const { clientX: x, clientY: y } = _lastPointerEvent;
+      const target = getPaintedElementAtPoint(x, y);
+      if (isQualityPanelTarget(target) || imageAtPoint(target, x, y) === image) return;
+    }
     hideButton(true);
   }, 240);
 }
 
+function isImageHitAtPoint(image, painted, x, y) {
+  const visible = PD.ImageMedia?.getVisibleRect(image);
+  if (!visible || !(painted instanceof Element)) return false;
+  const insideImage = containsPoint(visible, x, y, 0);
+  if (painted === image) return insideImage;
+  if (safeClosest(painted, 'video,iframe')) return false;
+  const overlay = safeClosest(painted, 'dialog,[role="dialog"],[aria-modal="true"],:popover-open');
+  if (overlay && !containsComposedElement(overlay, image)) return false;
+  const photoLink = PD.ImageMedia?.getPhotoLink(image);
+  // A single-photo link also owns its colored backdrop and click overlay.
+  // Hover can be in that backdrop while the toolbar remains anchored to the
+  // visible image. Never extend this rule to a multi-photo gallery/container.
+  if (photoLink && containsComposedElement(photoLink, painted)
+      && containsPoint(photoLink.getBoundingClientRect(), x, y, 0)) return true;
+  if (!insideImage) return false;
+  const imageBox = image.getBoundingClientRect();
+  for (let root = getSelectorParent(image), depth = 0; root && depth < 10; root = getSelectorParent(root), depth++) {
+    if (root === document.body || root === document.documentElement) break;
+    if (!containsComposedElement(root, painted)) continue;
+    // A sibling shading/click layer belongs to the first compact container
+    // owning exactly this image, not to a gallery, post, or page-wide overlay.
+    const images = [...safeQueryAll(root, 'img')];
+    const box = root.getBoundingClientRect();
+    return images.length === 1 && images[0] === image
+      && box.width <= imageBox.width * 1.5 && box.height <= imageBox.height * 1.5;
+  }
+  return false;
+}
+
 function imageAtPoint(target, x, y, includePosters = false) {
-  if (isQualityPanelTarget(target)) return null;
-  for (const element of new Set([target, ...(document.elementsFromPoint?.(x, y) || [])])) {
-    // Do not select a photo painted behind an unrelated dialog or video.
-    if (element !== target && !(target instanceof Element && target.contains(element))) continue;
-    if (element instanceof HTMLImageElement && (includePosters || PD.ImageMedia?.isEligible(element))
-        && isElementVisuallyRendered(element, 120, 120)
-        && containsPoint(element.getBoundingClientRect(), x, y)) return element;
+  const painted = getPaintedElementAtPoint(x, y) || target;
+  if (isQualityPanelTarget(painted)) return null;
+  const candidates = new Set([painted, ...(document.elementsFromPoint?.(x, y) || [])]
+    .filter(element => element instanceof HTMLImageElement));
+  const pointedLink = safeClosest(painted, 'a[href]');
+  for (const image of safeQueryAll(pointedLink, 'img')) {
+    if (PD.ImageMedia?.getPhotoLink(image) === pointedLink) candidates.add(image);
+  }
+  // pointer-events:none images are absent from elementsFromPoint. Resolve
+  // them through only the nearest unambiguous image/overlay container.
+  for (let root = painted, depth = 0; root instanceof Element && depth < 10; root = getSelectorParent(root), depth++) {
+    if (root === document.body || root === document.documentElement) break;
+    const images = [...safeQueryAll(root, 'img')];
+    if (images.length > 1) break;
+    if (images.length === 1) { candidates.add(images[0]); break; }
+  }
+  for (const image of candidates) {
+    if (!includePosters && !PD.ImageMedia?.isEligible(image)) continue;
+    const rect = PD.ImageMedia?.getVisibleRect(image);
+    if (PD.ImageMedia?.hasVisibleSize(image, rect) && isImageHitAtPoint(image, painted, x, y)) return image;
   }
   return null;
 }
@@ -598,6 +779,9 @@ function selectPointedImage(target, x, y) {
     if (wasImage) clearImageHide();
     return wasImage;
   }
+  // Unloading an inline preview reveals its cover; it does not turn the
+  // already selected video card into a new image-download target.
+  if (isLinkedItemCurrent() && containsComposedElement(_activeLinkedItem.anchor, target)) return false;
   const poster = imageAtPoint(target, x, y, true);
   const owner = PD.ImageMedia?.getVideoOwner(poster);
   if (owner) {
@@ -637,14 +821,124 @@ function getDirectMediaUrl(media) {
 
 const _mediaIds = new WeakMap();
 let _nextMediaId = 0;
+
+function isVideoCardLink(link) {
+  if (link?.localName !== 'a' || !link.querySelector('img,picture')) return false;
+  if (link.querySelectorAll('video,iframe').length > 1) return false;
+  try {
+    const url = new URL(PD.MediaContext.linkUrl(link));
+    // Require an item, not a feed/category/profile or arbitrary image link.
+    // Use the actual permalink; do not infer a video ID from its thumbnail.
+    return /\.(?:mp4|webm|m3u8|mpd)$/i.test(url.pathname)
+      || /(?:^|\/)(?:videos?|shorts|reels?|embed|watch)\/[^/]+\/?$/i.test(url.pathname)
+      || (/(?:^|\/)watch\/?$/i.test(url.pathname) && !!url.searchParams.get('v')?.trim());
+  } catch (_) { return false; }
+}
+
+function getVideoCardRoot(card) {
+  if (!isVideoCardLink(card)) return card;
+  const url = PD.MediaContext.linkUrl(card);
+  // The image, title and hover-feedback layer are siblings in modern cards.
+  // Stop at their first shared single-item root, never at the entire grid.
+  let parent = card.parentElement;
+  for (let depth = 0; parent && depth < 5; depth++, parent = parent.parentElement) {
+    if (parent === document.body || parent === document.documentElement) break;
+    const thumbnails = [...safeQueryAll(parent, 'a[href]')].filter(isVideoCardLink);
+    if (thumbnails.length !== 1 || thumbnails[0] !== card
+        || safeQueryAll(parent, 'video,iframe').length > 1) break;
+    const title = [...safeQueryAll(parent, 'a[href]')].find(link => link !== card
+      && PD.MediaContext.linksMatch(url, PD.MediaContext.linkUrl(link))
+      && (link.closest('h1,h2,h3,[role="heading"]') || /title/i.test(link.className + ' ' + link.id)));
+    if (title) return parent;
+  }
+  return card;
+}
+
+function isVideoCardRendered(card) {
+  if (isElementVisuallyRendered(card, 120, 70)) return true;
+  // A preview may hide only the image link while leaving its layout/card in
+  // place. The card must still be mounted and visibly occupy that same area.
+  if (!card?.isConnected) return false;
+  const root = getVideoCardRoot(card);
+  if (root === card || !isElementVisuallyRendered(root, 120, 70)) return false;
+  const rect = card.getBoundingClientRect();
+  return rect.width >= 120 && rect.height >= 70 && card.getClientRects().length > 0
+    && rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+}
+
+function isCardPreviewHit(card, painted, x, y) {
+  if (!(painted instanceof Element)) return false;
+  const box = card.getBoundingClientRect();
+  let root = painted;
+  for (let depth = 0; root && depth < 16; depth++, root = getSelectorParent(root)) {
+    if (root === document.body || root === document.documentElement
+        || safeMatches(root, 'dialog,[role="dialog"],[aria-modal="true"]')) break;
+    if (!safeMatches(root, '[class*="preview" i],[id*="preview" i]')) continue;
+    const owned = [...safeQueryAll(root, 'video,iframe')];
+    if (owned.length > 1) break;
+    if (owned.length !== 1 || !(owned[0] instanceof HTMLVideoElement)
+        || !isElementVisuallyRendered(root, 120, 70)) continue;
+    const rect = root.getBoundingClientRect();
+    const overlap = Math.max(0, Math.min(box.right, rect.right) - Math.max(box.left, rect.left))
+      * Math.max(0, Math.min(box.bottom, rect.bottom) - Math.max(box.top, rect.top));
+    if (!containsPoint(rect, x, y) || rect.width > box.width * 1.8 || rect.height > box.height * 1.8
+        || overlap < Math.min(box.width * box.height, rect.width * rect.height) * 0.7) continue;
+    const item = PD.MediaContext.getItemLink(owned[0]);
+    if (item?.url) return PD.MediaContext.linksMatch(item.url, PD.MediaContext.linkUrl(card));
+    // Retain only an already selected card while its preview loads/recycles.
+    // This grants visual ownership, NOT the preview's URL or media identity.
+    // Download context remains the frozen permalink; PiP still needs a match.
+    return card === _activeLinkedItem?.anchor && isLinkedItemCurrent();
+  }
+  return false;
+}
+
+function getVideoCardTitle(card) {
+  const url = PD.MediaContext.linkUrl(card);
+  let parent = card.parentElement;
+  for (let depth = 0; parent && depth < 5; depth++, parent = parent.parentElement) {
+    if (parent === document.body || parent === document.documentElement) break;
+    const thumbnails = [...safeQueryAll(parent, 'a[href]')].filter(isVideoCardLink);
+    if (thumbnails.some(link => !PD.MediaContext.linksMatch(url, PD.MediaContext.linkUrl(link)))) break;
+    const title = [...safeQueryAll(parent, 'a[href]')].find(link => link !== card
+      && PD.MediaContext.linksMatch(url, PD.MediaContext.linkUrl(link))
+      && (link.closest('h1,h2,h3,[role="heading"]') || /title/i.test(link.className + ' ' + link.id)));
+    const text = (title?.getAttribute('title') || title?.textContent || title?.getAttribute('aria-label') || '').trim();
+    if (text) return text;
+  }
+  return (card.title || card.getAttribute('aria-label') || card.querySelector('img')?.alt || '').trim();
+}
+
+function activateVideoCard(card) {
+  if (!isVideoCardLink(card) || !isVideoCardRendered(card)) return;
+  const item = { url: PD.MediaContext.linkUrl(card), title: getVideoCardTitle(card) };
+  const identity = getMediaIdentity(card, card, item);
+  const sameItem = card === _activeAnchor && !identityChanged(_activeIdentity, identity);
+  if (sameItem && isLinkedItemCurrent()) {
+    if (_activeMediaKey !== _dismissedMediaKey) positionBtn(_activeMedia);
+    return;
+  }
+  if (_activeIdentity && !sameItem) _qualityPanel?.invalidateContext?.();
+  _activeMedia = card;
+  _activeAnchor = card;
+  _activeContextNode = card;
+  _activePlayer = card;
+  _activeIdentity = identity;
+  _activeMediaKey = getMediaKey(card, identity, card);
+  _activeLinkedItem = { anchor: card, ...item, pageUrl: location.href };
+  if (_activeMediaKey !== _dismissedMediaKey) { clearHide(); positionBtn(card); }
+}
+
 function isLinkedItemCurrent() {
   return !!_activeLinkedItem && _activeLinkedItem.pageUrl === location.href
-    && isElementVisuallyRendered(_activeLinkedItem.anchor, 120, 70)
+    && isVideoCardRendered(_activeLinkedItem.anchor)
     && PD.MediaContext.linksMatch(_activeLinkedItem.url, PD.MediaContext.linkUrl(_activeLinkedItem.anchor));
 }
 
 function isLinkedItemPinned() {
-  return _activeMediaKey !== _dismissedMediaKey && isLinkedItemCurrent() && isQualityPanelInteractionActive();
+  return _activeMediaKey !== _dismissedMediaKey && isLinkedItemCurrent()
+    && (isQualityPanelInteractionActive()
+      || (_feedPointerInside && _pointerFeedAnchor === _activeLinkedItem.anchor));
 }
 
 function isFeedPreview(media) {
@@ -653,10 +947,14 @@ function isFeedPreview(media) {
 }
 
 function matchesPointerFeedSelection(media) {
-  if (!_pointerFeedAnchor || !isFeedPreview(media)) return true;
-  if (!_feedPointerInside && !_qualityPanel?.isPointerInteractionActive?.()) return false;
+  if (!_pointerFeedAnchor) return true;
+  if (!_feedPointerInside && !_qualityPanel?.isPointerInteractionActive?.()) {
+    // Leaving a feed must not let automatic discovery reopen its first card.
+    // Ordinary independent players outside that feed remain discoverable.
+    return !isFeedPreview(media) && !getWrappingMediaCard(media);
+  }
   const item = PD.MediaContext.getItemLink(media);
-  return isElementVisuallyRendered(_pointerFeedAnchor, 120, 70)
+  return isVideoCardRendered(_pointerFeedAnchor)
     && !!item && PD.MediaContext.linksMatch(item.url, PD.MediaContext.linkUrl(_pointerFeedAnchor));
 }
 
@@ -667,10 +965,20 @@ function clearFeedHide() {
 
 function scheduleFeedHide() {
   if (_feedHideTimer) return;
+  const anchor = _activeLinkedItem?.anchor || _pointerFeedAnchor;
   // Allow crossing the small gap between toolbar and portaled format list.
   // An open list or retained keyboard focus alone must not pin a feed card.
   _feedHideTimer = setTimeout(() => {
     _feedHideTimer = 0;
+    if (anchor !== (_activeLinkedItem?.anchor || _pointerFeedAnchor)) return;
+    // Re-read the live hit before closing. A queued exit can outlive a
+    // thumbnail -> preview -> controls transition with a stationary pointer.
+    if (_lastPointerEvent) {
+      const { clientX: x, clientY: y } = _lastPointerEvent;
+      const target = getPaintedElementAtPoint(x, y);
+      if (isQualityPanelTarget(target)) return;
+      selectPointedFeedCard(target, x, y, false);
+    }
     if (_feedPointerInside || _qualityPanel?.isPointerInteractionActive?.()) return;
     if (_activeLinkedItem || isFeedPreview(_activeMedia)) {
       clearHide(); hideButton(true);
@@ -678,8 +986,7 @@ function scheduleFeedHide() {
   }, 240);
 }
 
-function selectPointedFeedCard(target, x, y) {
-  if (!_activeLinkedItem && !_pointerFeedAnchor) return;
+function selectPointedFeedCard(target, x, y, scheduleExit = true) {
   if (isQualityPanelTarget(target) || _qualityPanel?.isGestureActive?.()) {
     clearFeedHide(); return;
   }
@@ -718,12 +1025,21 @@ function selectPointedFeedCard(target, x, y) {
     }
   }
   const currentAnchor = _activeLinkedItem?.anchor || _pointerFeedAnchor;
-  const card = links.find(link => PD.MediaContext.linkUrl(link) && isElementVisuallyRendered(link, 120, 70))
-    || (isElementVisuallyRendered(currentAnchor, 120, 70)
-      && containsPoint(currentAnchor.getBoundingClientRect(), x, y) ? currentAnchor : null);
+  const painted = getPaintedElementAtPoint(x, y);
+  const isPointedCard = link => {
+    if (!PD.MediaContext.linkUrl(link) || !isVideoCardRendered(link)) return false;
+    if (!isVideoCardLink(link) && link !== currentAnchor
+        && getWrappingMediaCard(link.querySelector('video,iframe')) !== link) return false;
+    const root = getVideoCardRoot(link);
+    if (containsComposedElement(root, painted) && containsPoint(root.getBoundingClientRect(), x, y)) return true;
+    // Visual card ownership must not depend on a ready/rendered <video> or
+    // on whichever preview happened to be the active media last frame.
+    return isCardPreviewHit(link, painted, x, y);
+  };
+  const card = links.find(isPointedCard) || (isPointedCard(currentAnchor) ? currentAnchor : null);
   if (!card) {
     _feedPointerInside = false;
-    scheduleFeedHide();
+    if (scheduleExit && (_pointerFeedAnchor || _activeLinkedItem)) scheduleFeedHide();
     return;
   }
   _feedPointerInside = true;
@@ -738,10 +1054,15 @@ function selectPointedFeedCard(target, x, y) {
     // Invalidating the controller also discards late analysis responses.
     hideButton(true);
   }
+  // Bootstrap from the hovered thumbnail itself. Waiting for an already
+  // active preview here made the first card (and unloaded previews) invisible.
+  activateVideoCard(card);
 }
 
 function getMediaAnchor(media, item = PD.MediaContext.getItemLink(media)) {
   if (!(media instanceof Element) || media instanceof HTMLIFrameElement || media instanceof HTMLImageElement) return media;
+  const wrappingCard = getWrappingMediaCard(media, item);
+  if (wrappingCard) return wrappingCard;
   // Hover previews can be portaled outside the feed card and disappear when
   // our toolbar receives the pointer. Use the player title link as well as a
   // wrapping link: an <a> around the preview need not have an href at all.
@@ -762,6 +1083,10 @@ function getMediaAnchor(media, item = PD.MediaContext.getItemLink(media)) {
       && ((item && PD.MediaContext.linksMatch(item.url, _activeLinkedItem.url)) || isLinkedItemPinned())) {
     return _activeLinkedItem.anchor;
   }
+  const player = getKnownPlayerContainer(media);
+  if (player) return player;
+  const siblingPlayer = getSiblingPlayerGroup(media);
+  if (siblingPlayer) return siblingPlayer.container;
   if (_activeAnchor && _activeAnchor !== media && _activeAnchor.contains(media)
       && safeQueryAll(_activeAnchor, 'video,iframe').length === 1) return _activeAnchor;
   if (safeMatches(media, PLAYER_PLACEHOLDER_SELECTOR)) return media;
@@ -786,7 +1111,8 @@ function getMediaIdentity(media, anchor = getMediaAnchor(media), item = PD.Media
   if (source) {
     try { source = new URL(source, location.href).href; } catch (_) {}
   }
-  const linkedPreview = anchor?.localName === 'a' && anchor !== media && !anchor.contains(media);
+  const linkedPreview = anchor?.localName === 'a' && anchor !== media && !!item?.url
+    && PD.MediaContext.linksMatch(item.url, PD.MediaContext.linkUrl(anchor));
   return {
     page: location.href,
     item: identityNode?.getAttribute('data-video-id') || identityNode?.getAttribute('data-media-id') || '',
@@ -869,17 +1195,9 @@ function getMediaPlayerNode(target, media, contextNode) {
       || media;
   }
 
-  // Some feeds render controls as a sibling of <video>. Walk to the first
-  // compact root that owns one video and one player control layer.
-  let root = media?.parentElement || null;
-  for (let depth = 0; root && depth < 10; depth++, root = root.parentElement) {
-    const players = safeQueryAll(root, '[aria-label="Video player"]');
-    const videos = safeQueryAll(root, 'video');
-
-    if (players.length === 1 && videos.length === 1 && videos[0] === media) {
-      return players[0];
-    }
-  }
+  // Use the same ownership resolution as hit-testing and anchor selection.
+  const siblingPlayer = getSiblingPlayerGroup(media);
+  if (siblingPlayer) return siblingPlayer.controls;
 
   const renderSurface = getMediaRenderSurface(media);
   if (renderSurface && renderSurface !== media) return renderSurface;
@@ -890,7 +1208,10 @@ function getMediaPlayerNode(target, media, contextNode) {
 }
 
 function activateMediaPlayer(media, target) {
-  if (media === _activeMedia && isLinkedItemPinned()) {
+  // A loading/emptied event may arrive during the short pointer-exit grace
+  // period. It cannot turn the selected permalink back into a raw preview,
+  // nor discard a thumbnail-only card because anchor === media.
+  if (media === _activeMedia && isLinkedItemCurrent()) {
     return { player: _activePlayer, mediaKey: _activeMediaKey };
   }
   const contextNode = getMediaContextNode(target, media);
@@ -914,7 +1235,7 @@ function activateMediaPlayer(media, target) {
   _activeContextNode = contextNode;
   _activePlayer = player;
   _activeMediaKey = mediaKey;
-  _activeLinkedItem = anchor?.localName === 'a' && anchor !== media && !anchor.contains(media)
+  _activeLinkedItem = anchor?.localName === 'a' && anchor !== media
     && item?.url && PD.MediaContext.linksMatch(item.url, PD.MediaContext.linkUrl(anchor))
     ? { anchor, url: item.url, title: item.title || getMediaTitle(media, contextNode), pageUrl: location.href }
     : null;
@@ -936,7 +1257,7 @@ function findMediaAtPoint(x, y, target) {
     || safeClosest(targetElement, MEDIA_ELEMENT_SELECTOR);
   if (isVideoElement(directMedia)) candidates.add(directMedia);
 
-  const stack = document.elementsFromPoint?.(x, y) || (targetElement ? [targetElement] : []);
+  const stack = getPaintedStackAtPoint(x, y);
   for (const element of stack) {
     if (!(element instanceof Element)) continue;
 
@@ -953,7 +1274,7 @@ function findMediaAtPoint(x, y, target) {
 
   if (candidates.size === 0) {
     let ancestor = targetElement;
-    for (let level = 0; level < 12 && ancestor; level++, ancestor = ancestor.parentElement) {
+    for (let level = 0; level < 16 && ancestor; level++, ancestor = getSelectorParent(ancestor)) {
       addMediaFromRoot(ancestor, candidates);
       if (candidates.size > 0) break;
     }
@@ -966,6 +1287,9 @@ function findMediaAtPoint(x, y, target) {
 
     const rect = surface.getBoundingClientRect();
     if (!containsPoint(rect, x, y, 2)) continue;
+    // Hover and automatic scans must agree about the same painted owner;
+    // otherwise pointermove shows the toolbar and the next scan hides it.
+    if (!isMediaHitAtPoint(media, x, y, stack[0])) continue;
 
     let score = 0;
     if (surface !== media) score += 35;
@@ -1018,7 +1342,7 @@ function getMediaUnderLastPointer() {
   if (!_lastPointerEvent) return null;
 
   const { clientX, clientY, target: previousTarget } = _lastPointerEvent;
-  const target = document.elementFromPoint?.(clientX, clientY) || previousTarget;
+  const target = getPaintedElementAtPoint(clientX, clientY) || previousTarget;
   const media = findMediaAtPoint(clientX, clientY, target);
 
   return { media, target };
@@ -1028,7 +1352,14 @@ function activateDirectMedia(media, target = media) {
   if (media instanceof HTMLImageElement && !IS_TOP_FRAME) return false;
   if (!matchesPointerFeedSelection(media)) return false;
   if (isLinkedItemPinned()) {
-    if (media !== _activeMedia) return false;
+    if (media !== _activeMedia) {
+      if (getMediaAnchor(media) !== _activeLinkedItem.anchor) return false;
+      // A replacement <video> in the same card updates PiP, not the item's
+      // URL/cache identity or its open format picker.
+      _activeMedia = media;
+      _activeContextNode = getMediaContextNode(target, media);
+      _activePlayer = getMediaPlayerNode(target, media, _activeContextNode);
+    }
     positionBtn(_activeMedia); return true;
   }
   if (!isRenderedMedia(media)) return false;
@@ -1223,10 +1554,37 @@ function queueMediaScan() {
       return;
     }
 
+    // Re-evaluate stationary-pointer ownership before automatic discovery.
+    // Layout changes and playback events must not promote another card.
+    if (_pointerFeedAnchor && _lastPointerEvent) {
+      const { clientX: x, clientY: y } = _lastPointerEvent;
+      selectPointedFeedCard(getPaintedElementAtPoint(x, y), x, y);
+    }
+
     // Pin the card before reconciling the disposable portal player. This is
     // also the URL snapshot used by getContext, not just a visual workaround.
     if (_activeLinkedItem && !isLinkedItemCurrent()) hideButton(true);
-    if (isLinkedItemPinned()) { positionBtn(_activeMedia); return; }
+    if (isLinkedItemPinned()) {
+      if (!_activeLinkedItem.anchor.contains(_activeMedia)) {
+        const replacements = [...safeQueryAll(_activeLinkedItem.anchor, 'video')];
+        if (replacements.length === 1) activateDirectMedia(replacements[0], _activeLinkedItem.anchor);
+      }
+      positionBtn(_activeMedia); return;
+    }
+    if (_activeLinkedItem) {
+      // Linked cards have one exit path. Do not run ordinary video
+      // reconciliation while their pointer-exit timer is pending: that path
+      // could clear the card identity or select a different autoplay video.
+      scheduleFeedHide();
+      return;
+    }
+    if (_pointerFeedAnchor && _feedPointerInside) {
+      const pointed = getMediaUnderLastPointer();
+      if (pointed?.media) activateDirectMedia(pointed.media, pointed.target);
+      // A hovered card that is still loading is not permission to select the
+      // first visible video elsewhere in the carousel.
+      return;
+    }
 
     // A preview/player can create or replace its media node between pointerdown
     // and click. Adopt that node before deciding to hide the stable toolbar.
@@ -1251,6 +1609,14 @@ function queueMediaScan() {
       }
     }
 
+    // Player controls can briefly replace their painted layer within a frame.
+    // Recheck a still-mounted player after a short grace period instead of
+    // tearing down its picker on the first transient failed hit.
+    if (_activeMedia && (getKnownPlayerContainer(_activeMedia) || getSiblingPlayerGroup(_activeMedia))
+        && isElementVisuallyRendered(_activeAnchor, 120, 70)) {
+      scheduleHide(200);
+      return;
+    }
     if (_activeMedia) hideButton(true);
     const media = findProminentVisibleMedia();
     if (media) activateDirectMedia(media, media);
@@ -1297,13 +1663,14 @@ function initListeners() {
   if (!IS_TOP_FRAME) return;
 
   const rememberPointer = event => {
+    const target = event.composedPath?.().find(node => node instanceof Element) || event.target;
     _lastPointerEvent = {
       clientX: event.clientX,
       clientY: event.clientY,
-      target: event.target
+      target
     };
-    if (selectPointedImage(event.target, event.clientX, event.clientY)) return;
-    selectPointedFeedCard(event.target, event.clientX, event.clientY);
+    if (selectPointedImage(target, event.clientX, event.clientY)) return;
+    selectPointedFeedCard(target, event.clientX, event.clientY);
   };
 
   document.addEventListener('pointermove', event => {
@@ -1365,6 +1732,7 @@ function initListeners() {
     // video -> toolbar and icon -> button transitions. Only leaving the
     // document should schedule a document-level hide.
     if (event.target === document.documentElement && !event.relatedTarget) {
+      _lastPointerEvent = null;
       if (_activeMedia instanceof HTMLImageElement) scheduleImageHide();
       else if (_pointerFeedAnchor) { _feedPointerInside = false; scheduleFeedHide(); }
       else scheduleHide(150);
@@ -1415,6 +1783,10 @@ function initListeners() {
       } else if (mutation.type === 'attributes') {
         const target = mutation.target;
         if (!(target instanceof Element)) continue;
+        // Image crops can change via inline left/width/overflow without a
+        // class mutation. Ignore unrelated/player/UI style animation churn.
+        if (mutation.attributeName === 'style' && !(_activeMedia instanceof HTMLImageElement
+            && containsComposedElement(target, _activeMedia))) continue;
         if (isMediaElement(target)
             || (_activeMedia instanceof HTMLImageElement && target.localName === 'source'
               && target.parentElement === _activeMedia.closest('picture'))
@@ -1439,7 +1811,7 @@ function initListeners() {
     subtree: true,
     childList: true,
     attributes: true,
-    attributeFilter: MEDIA_MUTATION_ATTRIBUTES
+    attributeFilter: [...MEDIA_MUTATION_ATTRIBUTES, 'style']
   });
 
   const reposition = () => {
