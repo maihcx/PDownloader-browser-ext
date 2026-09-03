@@ -47,11 +47,15 @@ PDownloader is developed across the following repositories:
 
 ## Features
 
+- Redesigned popup with separate Files and Settings tabs, light/dark/system themes, and an expanded view pinned to the source tab.
+- Searches and filters detected files, sorts by name or size, copies links, and sends explicitly selected files with per-item results.
+- Exposes existing file-size and extension rules with validation; explains exclusions inherited from parent domains.
 - Automatically intercepts supported browser downloads and hands them to PDownloader.
 - Keeps the browser's original download running if the desktop application is unavailable or rejects the request.
 - Detects direct video, audio, PDF, HLS (`.m3u8`), and DASH (`.mpd`) resources on the current page.
 - Analyzes available video and audio formats, including resolution, container, codec, and file size when provided by the source.
-- Adds media actions directly to supported page players, including dedicated handling for YouTube, TikTok, Facebook, Instagram, and Vimeo URLs.
+- Adds one shared video toolbar and format picker across websites, including paused videos and visible player placeholders; no separate YouTube content script.
+- Provides native picture-in-picture with a temporary override of the selected video's disable hint, where supported by browser permissions.
 - Sends links, images, media, or the current page to PDownloader from the context menu.
 - Preserves relevant request headers, referrer information, cookies, browser containers, and partitioned-cookie context for authenticated downloads.
 - Supports global interception settings, per-site exclusions, notifications, and a session counter.
@@ -59,6 +63,14 @@ PDownloader is developed across the following repositories:
 - Uses one source tree for Chromium and Firefox builds.
 
 ## How it works
+
+### File selection and capture rules
+
+Selected files remain selected when filtered out. **Select visible** affects only the current results; **Send selected** sends the entire explicit selection. Keep the popup/expanded view open until all requests have been acknowledged. Once accepted, actual downloads run independently in PDownloader.
+
+The size setting is an additional capture rule, not a universal minimum: listed extensions and supported MIME types can still be intercepted below that size. Setting it to zero disables only size-based capture.
+
+### Download flow
 
 1. The extension observes browser downloads, page media elements, and media network requests.
 2. A suitable download or media candidate is selected while small stream fragments and unrelated requests are ignored.
