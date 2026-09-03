@@ -407,6 +407,12 @@
   "ytFilterAudio": {
     "message": "Audio only"
   },
+  "qaMedia": {
+    "message": "Media"
+  },
+  "qaUnknownFormat": {
+    "message": "Stream type unknown"
+  },
   "ytNoFormats": {
     "message": "No matching format"
   },
