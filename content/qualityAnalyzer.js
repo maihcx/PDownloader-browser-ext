@@ -192,10 +192,31 @@
   }
 
   function getFormatKind(format) {
-    const note = String(format?.note || '').toLowerCase();
+    // Use structured track metadata when provided by Core. null is unknown;
+    // it must never become "audio only" or trigger an extra audio download.
+    if (format && (Object.hasOwn(format, 'hasVideo') || Object.hasOwn(format, 'hasAudio'))) {
+      if (format.hasVideo === false && format.hasAudio === false) return 'unknown';
+      if (format.hasVideo === false) return 'audio';
+      if (format.hasAudio === false) return 'video';
+      if (format.hasVideo === true && format.hasAudio === true) return 'muxed';
+      return 'unknown';
+    }
+    const note = String(format?.note || '').trim().toLowerCase();
     if (note === 'audio only') return 'audio';
     if (note === 'video only') return 'video';
-    return 'muxed';
+    return note === 'unknown' ? 'unknown' : 'muxed';
+  }
+
+  function getFormatQuality(format, kind) {
+    if (kind === 'audio') return PD.I18n.t('popupMediaAudio');
+    if (Number(format.height) > 0) return format.height + 'p';
+    return PD.I18n.t(kind === 'unknown' && format.hasVideo !== true ? 'qaMedia' : 'popupMediaVideo');
+  }
+
+  function getFormatKindText(kind, merged = false) {
+    return PD.I18n.t(kind === 'unknown' ? 'qaUnknownFormat'
+      : kind === 'audio' ? 'ytFilterAudio'
+      : kind === 'video' && !merged ? 'ytFilterVideo' : 'ytFilterMuxed');
   }
 
   function renderDropdown(dropdown, data, context, panel, control) {
@@ -227,18 +248,18 @@
       list.replaceChildren();
       const formats = (data.formats || []).filter(format => {
         const kind = getFormatKind(format);
-        if (filter === 'muxed' && kind === 'audio') return false;
+        if (filter === 'muxed' && kind !== 'muxed' && kind !== 'video') return false;
         if (filter === 'video' && kind !== 'video') return false;
         if (filter === 'audio' && kind !== 'audio') return false;
-        return [format.height ? format.height + 'p' : 'audio', format.ext, format.note, format.size].join(' ').toLowerCase().includes(query);
+        return [getFormatQuality(format, kind), getFormatKindText(kind, kind === 'video' && filter !== 'video'), format.ext, format.note, format.size].join(' ').toLowerCase().includes(query);
       });
       if (!formats.length) list.append(node('div', 'pd-quality-empty', PD.I18n.t('ytNoFormats')));
       footer.textContent = PD.I18n.t(formats.some(format => getFormatKind(format) === 'video') && filter !== 'video' ? 'qaMergeHint' : 'qaSendHint');
       for (const format of formats) {
         const kind = getFormatKind(format), merged = kind === 'video' && filter !== 'video';
-        const quality = format.height ? format.height + 'p' : PD.I18n.t('popupMediaAudio');
+        const quality = getFormatQuality(format, kind);
         const ext = (format.ext || 'mp4').toUpperCase();
-        const kindText = PD.I18n.t(kind === 'audio' ? 'ytFilterAudio' : kind === 'video' && !merged ? 'ytFilterVideo' : 'ytFilterMuxed');
+        const kindText = getFormatKindText(kind, merged);
         const item = node('button', 'pd-quality-item'); item.type = 'button';
         item.setAttribute('aria-label', quality + ' ' + ext + ' · ' + kindText);
         const mark = node('span', 'pd-quality-format-icon'); mark.append(icon(kind === 'audio' ? 'audio' : 'video'));

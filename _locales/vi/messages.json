@@ -407,6 +407,12 @@
   "ytFilterAudio": {
     "message": "Chỉ Audio"
   },
+  "qaMedia": {
+    "message": "Nội dung"
+  },
+  "qaUnknownFormat": {
+    "message": "Chưa xác định luồng hình/tiếng"
+  },
   "ytNoFormats": {
     "message": "Không có định dạng phù hợp"
   },
