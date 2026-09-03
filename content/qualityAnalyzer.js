@@ -219,12 +219,23 @@
       : kind === 'video' && !merged ? 'ytFilterVideo' : 'ytFilterMuxed');
   }
 
+  function formatDuration(seconds) {
+    if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return '';
+    const total = Math.floor(seconds), hours = Math.floor(total / 3600);
+    const minutes = Math.floor(total / 60) % 60;
+    const remainder = String(total % 60).padStart(2, '0');
+    return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${remainder}`
+      : `${minutes}:${remainder}`;
+  }
+
   function renderDropdown(dropdown, data, context, panel, control) {
     control.header();
     let filter = 'all', query = '', sending = false;
     const revision = control.revision();
     const title = node('div', 'pd-quality-subtitle', data.title || context.title || '');
     title.title = title.textContent; dropdown.append(title);
+    const duration = formatDuration(data.duration);
+    if (duration) dropdown.append(node('div', 'pd-quality-footer', PD.I18n.t('qaDuration') + ': ' + duration));
     const search = node('input', 'pd-quality-search');
     search.type = 'search'; search.placeholder = PD.I18n.t('ytSearchPlaceholder');
     search.setAttribute('aria-label', PD.I18n.t('ytSearchPlaceholder'));
