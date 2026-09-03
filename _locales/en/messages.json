@@ -423,7 +423,7 @@
     "message": "PDownloader Webhook"
   },
   "extensionUpdatedNotificationMessage": {
-    "message": "The PDownloader Webhook extension has just been updated! Please update the PDownloader app on your PC."
+    "message": "The PDownloader Webhook extension has just been updated!"
   },
   "popupSectionDetectedMedia": {
     "message": "Detected files"
