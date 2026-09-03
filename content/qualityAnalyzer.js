@@ -232,10 +232,6 @@
     control.header();
     let filter = 'all', query = '', sending = false;
     const revision = control.revision();
-    const title = node('div', 'pd-quality-subtitle', data.title || context.title || '');
-    title.title = title.textContent; dropdown.append(title);
-    const duration = formatDuration(data.duration);
-    if (duration) dropdown.append(node('div', 'pd-quality-footer', PD.I18n.t('qaDuration') + ': ' + duration));
     const search = node('input', 'pd-quality-search');
     search.type = 'search'; search.placeholder = PD.I18n.t('ytSearchPlaceholder');
     search.setAttribute('aria-label', PD.I18n.t('ytSearchPlaceholder'));
@@ -253,8 +249,10 @@
       filterBar.append(button);
     }
     dropdown.append(filterBar);
-    const list = node('div', 'pd-quality-list'), footer = node('div', 'pd-quality-footer');
-    dropdown.append(list, footer);
+    const list = node('div', 'pd-quality-list');
+    dropdown.append(list);
+    const duration = formatDuration(data.duration);
+    if (duration) dropdown.append(node('div', 'pd-quality-footer', PD.I18n.t('qaDuration') + ': ' + duration));
     function draw() {
       list.replaceChildren();
       const formats = (data.formats || []).filter(format => {
@@ -265,7 +263,6 @@
         return [getFormatQuality(format, kind), getFormatKindText(kind, kind === 'video' && filter !== 'video'), format.ext, format.note, format.size].join(' ').toLowerCase().includes(query);
       });
       if (!formats.length) list.append(node('div', 'pd-quality-empty', PD.I18n.t('ytNoFormats')));
-      footer.textContent = PD.I18n.t(formats.some(format => getFormatKind(format) === 'video') && filter !== 'video' ? 'qaMergeHint' : 'qaSendHint');
       for (const format of formats) {
         const kind = getFormatKind(format), merged = kind === 'video' && filter !== 'video';
         const quality = getFormatQuality(format, kind);
