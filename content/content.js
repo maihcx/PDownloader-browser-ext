@@ -274,12 +274,33 @@ function isMediaHitAtPoint(media, x, y, painted = getPaintedElementAtPoint(x, y)
   // and periodic scans must recognize it as this video's own controls. Do not
   // accept arbitrary overlays elsewhere inside a shared feed/page container.
   if (siblingPlayer && containsComposedElement(siblingPlayer.controls, painted)) return true;
-  // A <video class="video-..."> must not become its own context: a sibling
-  // poster/control layer belongs to the common container, not to the video.
-  const context = safeClosest(getSelectorParent(surface), MEDIA_CONTEXT_SELECTOR);
-  if (!context || !containsComposedElement(context, painted)) return false;
-  const owned = [...safeQueryAll(context, 'video,iframe')];
-  return owned.length === 1 && owned[0] === media;
+  // The playback engine and its overlay can be in parallel DOM branches.
+  // Stopping at the nearest "player" class misses the outer controls of a
+  // recycled feed player. Climb to their first common, single-media surface,
+  // never to an entire feed or an unrelated modal painted above that surface.
+  const overlay = safeClosest(painted, 'dialog,[role="dialog"],[aria-modal="true"],:popover-open')
+    || getOpenOverlayContainer(painted);
+  if (overlay && !containsComposedElement(overlay, media)) return false;
+  const rect = surface.getBoundingClientRect();
+  const nearestContext = safeClosest(getSelectorParent(surface), MEDIA_CONTEXT_SELECTOR);
+  if (!containsPoint(rect, x, y, 2)) return false;
+  for (let context = getSelectorParent(surface), depth = 0; context && depth < 14;
+      depth++, context = getSelectorParent(context)) {
+    if (context === document.body || context === document.documentElement) break;
+    const owned = [...safeQueryAll(context, 'video,iframe')];
+    if (owned.length > 1) break;
+    if (owned.length === 1 && owned[0] === media
+        && safeMatches(context, MEDIA_CONTEXT_SELECTOR)
+        && containsComposedElement(context, painted)) {
+      const box = context.getBoundingClientRect();
+      // Preserve the established nearest-context rule. Only extend ownership
+      // to more distant shells when they are still media-sized, not a page.
+      if ((context === nearestContext || (box.width <= rect.width * 1.6 && box.height <= rect.height * 1.6))
+          && containsPoint(box, x, y, 2) && isElementVisuallyRendered(context, 60, 40)) return true;
+    }
+    if (safeMatches(context, 'article,[role="article"]')) break;
+  }
+  return false;
 }
 
 function getFrameSource(frame) {
@@ -1639,6 +1660,14 @@ function processPointerEvent() {
 
   const pointed = getMediaUnderLastPointer();
   const target = pointed?.target || _lastPointerEvent.target;
+  // Scrolling/recycling can leave focus inside an open picker whose player
+  // is already gone. That old interaction lock must not suppress the next
+  // visible video. A mounted replacement in the same visible anchor and an
+  // in-progress gesture still retain the existing picker.
+  if (forceRefresh && _activeMedia && !_qualityPanel?.isGestureActive?.()
+      && !isRenderedMedia(_activeMedia) && !isElementVisuallyRendered(_activeAnchor, 120, 70)) {
+    clearHide(); hideButton(true);
+  }
   if (selectPointedImage(target, _lastPointerEvent.clientX, _lastPointerEvent.clientY)) return;
   selectPointedFeedCard(target, _lastPointerEvent.clientX, _lastPointerEvent.clientY);
 
@@ -1830,13 +1859,11 @@ function initListeners() {
     if (_activeMedia instanceof HTMLImageElement) {
       queuePointerProcessing(true); queueMediaScan(); return;
     }
-    if (isQualityPanelInteractionActive()) { clearHide(); return; }
-
-    if (_lastPointerEvent) {
-      queuePointerProcessing(true);
-    } else {
-      reposition();
-    }
+    // An open picker is not a reason to stop following page scrolling. The
+    // reconciliation paths retain live owners/gestures and release vanished
+    // ones; scrolling the picker's own list is excluded above.
+    if (_lastPointerEvent) queuePointerProcessing(true);
+    queueMediaScan();
   }, true);
 
   window.addEventListener('resize', () => {
