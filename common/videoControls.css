@@ -72,7 +72,7 @@
 .pd-quality-dropdown .pd-quality-filter-btn { padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; color: var(--pd-muted); font-size: 10px; }
 .pd-quality-dropdown .pd-quality-filter-btn:hover { background: var(--pd-hover); color: var(--pd-text); }
 .pd-quality-dropdown .pd-quality-filter-btn.active { background: var(--pd-accent-bg); border-color: var(--pd-accent); color: var(--pd-accent); }
-.pd-quality-list { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--pd-scrollbar) transparent; padding: 4px 8px; min-height: 0; }
+.pd-quality-list { display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--pd-scrollbar) transparent; padding: 8px; min-height: 0; }
 .pd-quality-dropdown .pd-quality-item { display: flex; align-items: center; gap: 10px; width: 100%; border-radius: 7px; padding: 10px 6px; min-height: 53px; }
 .pd-quality-dropdown .pd-quality-item:hover { background: var(--pd-hover); }
 .pd-quality-item:disabled { opacity: .65; cursor: wait; }

@@ -322,8 +322,7 @@
     search.type = 'search'; search.placeholder = PD.I18n.t('qaImageSearch');
     search.setAttribute('aria-label', search.placeholder);
     const list = node('div', 'pd-quality-list');
-    const footer = node('div', 'pd-quality-footer', PD.I18n.t('qaImageHint'));
-    dropdown.append(search, list, footer);
+    dropdown.append(search, list);
     search.addEventListener('input', () => { query = search.value.toLowerCase(); draw(); });
     function draw() {
       list.replaceChildren();
