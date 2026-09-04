@@ -401,9 +401,6 @@
   "ytFilterMuxed": {
     "message": "Video + Audio"
   },
-  "ytFilterVideo": {
-    "message": "Chỉ Video"
-  },
   "ytFilterAudio": {
     "message": "Chỉ Audio"
   },
@@ -513,9 +510,6 @@
   },
   "qaFilterFormats": {
     "message": "Lọc định dạng"
-  },
-  "qaMergeHint": {
-    "message": "PDownloader sẽ ghép âm thanh cho định dạng video riêng. Dung lượng chưa gồm âm thanh ghép."
   },
   "qaSendHint": {
     "message": "Chọn định dạng để gửi đến PDownloader."
