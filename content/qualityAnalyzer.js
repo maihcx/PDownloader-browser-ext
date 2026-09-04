@@ -197,13 +197,12 @@
     if (format && (Object.hasOwn(format, 'hasVideo') || Object.hasOwn(format, 'hasAudio'))) {
       if (format.hasVideo === false && format.hasAudio === false) return 'unknown';
       if (format.hasVideo === false) return 'audio';
-      if (format.hasAudio === false) return 'video';
+      if (format.hasAudio === false) return 'videoNeedsAudio';
       if (format.hasVideo === true && format.hasAudio === true) return 'muxed';
       return 'unknown';
     }
     const note = String(format?.note || '').trim().toLowerCase();
     if (note === 'audio only') return 'audio';
-    if (note === 'video only') return 'video';
     return note === 'unknown' ? 'unknown' : 'muxed';
   }
 
@@ -213,10 +212,10 @@
     return PD.I18n.t(kind === 'unknown' && format.hasVideo !== true ? 'qaMedia' : 'popupMediaVideo');
   }
 
-  function getFormatKindText(kind, merged = false) {
+  function getFormatKindText(kind) {
     return PD.I18n.t(kind === 'unknown' ? 'qaUnknownFormat'
       : kind === 'audio' ? 'ytFilterAudio'
-      : kind === 'video' && !merged ? 'ytFilterVideo' : 'ytFilterMuxed');
+      : 'ytFilterMuxed');
   }
 
   function formatDuration(seconds) {
@@ -239,7 +238,7 @@
     dropdown.append(search);
     const filterBar = node('div', 'pd-quality-filters');
     filterBar.setAttribute('role', 'group'); filterBar.setAttribute('aria-label', PD.I18n.t('qaFilterFormats'));
-    for (const [value, key] of [['all', 'ytFilterAll'], ['muxed', 'ytFilterMuxed'], ['video', 'ytFilterVideo'], ['audio', 'ytFilterAudio']]) {
+    for (const [value, key] of [['all', 'ytFilterAll'], ['muxed', 'ytFilterMuxed'], ['audio', 'ytFilterAudio']]) {
       const button = node('button', 'pd-quality-filter-btn' + (value === 'all' ? ' active' : ''), PD.I18n.t(key));
       button.type = 'button'; button.dataset.filter = value; button.setAttribute('aria-pressed', String(value === 'all'));
       button.addEventListener('click', () => {
@@ -257,23 +256,24 @@
       list.replaceChildren();
       const formats = (data.formats || []).filter(format => {
         const kind = getFormatKind(format);
-        if (filter === 'muxed' && kind !== 'muxed' && kind !== 'video') return false;
-        if (filter === 'video' && kind !== 'video') return false;
+        if (filter === 'muxed' && kind !== 'muxed' && kind !== 'videoNeedsAudio') return false;
         if (filter === 'audio' && kind !== 'audio') return false;
-        return [getFormatQuality(format, kind), getFormatKindText(kind, kind === 'video' && filter !== 'video'), format.ext, format.note, format.size].join(' ').toLowerCase().includes(query);
+        return [getFormatQuality(format, kind), getFormatKindText(kind), format.ext, format.note, format.size].join(' ').toLowerCase().includes(query);
       });
       if (!formats.length) list.append(node('div', 'pd-quality-empty', PD.I18n.t('ytNoFormats')));
       for (const format of formats) {
-        const kind = getFormatKind(format), merged = kind === 'video' && filter !== 'video';
+        const kind = getFormatKind(format), needsAudioMerge = kind === 'videoNeedsAudio';
         const quality = getFormatQuality(format, kind);
         const ext = (format.ext || 'mp4').toUpperCase();
-        const kindText = getFormatKindText(kind, merged);
+        const kindText = getFormatKindText(kind);
         const item = node('button', 'pd-quality-item'); item.type = 'button';
         item.setAttribute('aria-label', quality + ' ' + ext + ' · ' + kindText);
         const mark = node('span', 'pd-quality-format-icon'); mark.append(icon(kind === 'audio' ? 'audio' : 'video'));
         const description = node('span', 'pd-quality-description');
         description.append(node('strong', '', quality), node('small', '', ext + ' · ' + kindText));
-        item.append(mark, description, node('span', 'pd-quality-size', format.size || '—'), icon('download'));
+        const rawSize = String(format.size || '');
+        const displayedSize = needsAudioMerge && rawSize && !rawSize.startsWith('≈') ? '≈ ' + rawSize : rawSize;
+        item.append(mark, description, node('span', 'pd-quality-size', displayedSize || '—'), icon('download'));
         item.addEventListener('click', async () => {
           if (sending || revision !== control.revision()) return;
           sending = true; dropdown.querySelectorAll('.pd-quality-item, .pd-quality-filter-btn').forEach(button => { button.disabled = true; });
@@ -287,9 +287,9 @@
             if (control.current && !await control.current(revision)) return;
             if (revision !== control.revision()) return;
             const response = await PDWebExt.runtime.sendMessage({
-              action: 'download_media_format', url: data.analysisUrl || context.url, formatId: String(format.id) + (merged ? '+bestaudio' : ''),
+              action: 'download_media_format', url: data.analysisUrl || context.url, formatId: String(format.id) + (needsAudioMerge ? '+bestaudio' : ''),
               filename: sanitizeName(title) + '_' + quality + '.' + (format.ext || 'mp4'),
-              title, filesize: merged ? 0 : (format.filesize || 0),
+              title, filesize: needsAudioMerge ? 0 : (format.filesize || 0),
               referer: context.referer || location.href, headers: context.headers || undefined
             });
             if (revision !== control.revision()) return;
@@ -322,7 +322,8 @@
     search.type = 'search'; search.placeholder = PD.I18n.t('qaImageSearch');
     search.setAttribute('aria-label', search.placeholder);
     const list = node('div', 'pd-quality-list');
-    dropdown.append(search, list);
+    const footer = node('div', 'pd-quality-footer', PD.I18n.t('qaImageHint'));
+    dropdown.append(search, list, footer);
     search.addEventListener('input', () => { query = search.value.toLowerCase(); draw(); });
     function draw() {
       list.replaceChildren();

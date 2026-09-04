@@ -401,9 +401,6 @@
   "ytFilterMuxed": {
     "message": "Video + Audio"
   },
-  "ytFilterVideo": {
-    "message": "Video only"
-  },
   "ytFilterAudio": {
     "message": "Audio only"
   },
@@ -513,9 +510,6 @@
   },
   "qaFilterFormats": {
     "message": "Filter formats"
-  },
-  "qaMergeHint": {
-    "message": "Video-only formats will be merged with audio by PDownloader. Size shown excludes added audio."
   },
   "qaSendHint": {
     "message": "Select a format to send to PDownloader."
